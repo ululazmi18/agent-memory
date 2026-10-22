@@ -1,22 +1,22 @@
 ---
 trigger: model_decision
-description: Wajib menggunakan kartu identitas memori SQLite untuk folder/file dengan rujukan baris eksak (Lstart-Lend) tanpa membaca kode mentah. Eksplorasi folder bertingkat progressive depth.
+description: Standar wajib 2x lipat eksplorasi ekstrem memori SQLite FTS5 untuk folder/berkas dengan rujukan baris eksak (Lstart-Lend) tanpa membaca kode mentah. Menjamin Zero-Raw File Reading via MCP.
 ---
 
-# PROTOKOL KARTU IDENTITAS MEMORI FOLDER & BERKAS DENGAN RUJUKAN BARIS EKSAK
+# PROTOKOL STANDAR LITERASI 2X LIPAT EKSPLORASI EKSTREM KARTU IDENTITAS MEMORI
 
-Aturan ini bersifat mutlak (*mandatory*) saat menjawab pertanyaan atau menerima mention mengenai folder maupun berkas di seluruh proyek aktif.
+Aturan ini bersifat mutlak (*mandatory*) saat menjawab pertanyaan, mengeksplorasi sistem, atau menerima mention mengenai folder maupun berkas di seluruh proyek aktif.
 
 ---
 
 ## 1. Prinsip Mutlak: Zero-Raw Code Inspection (Memory-First Gatekeeping)
 AI Agent **DILARANG KERAS** memanggil `view_file` atau `read_file` pada berkas kode mentah hanya untuk mencari tahu:
-- Apa fungsi atau peran berkas/folder X?
-- Di mana letak fungsi/simbol Y?
-- Bagian skrip mana yang mengeksekusi logika Z?
-- Apa skema kolom atau contoh data pada berkas CSV/JSON?
+- Apa fungsi, tujuan, atau peran arsitektural berkas/folder X?
+- Di mana letak fungsi/simbol Y, apa signature, docstring, atau call graph-nya?
+- Bagian baris skrip mana yang mengeksekusi logika atau algoritma Z?
+- Apa skema kolom, distribusi kategori empiris, atau contoh sampel data pada berkas CSV/JSON?
 
-**AI Agent WAJIB menggunakan Agent Memory Engine terlebih dahulu via MCP (`memory_batch_inspect`, `memory_find_by_intent`) atau CLI (`python -m agent_memory -q ... -f ... -i ... -b ...`)!**
+**AI Agent WAJIB menggunakan Agent Memory Engine terlebih dahulu via MCP (`memory_batch_inspect`, `memory_find_by_intent`, `memory_get_phase_map`) atau CLI (`python -m agent_memory -q ... -f ... -i ... -b ...`)!**
 
 ---
 
@@ -26,24 +26,27 @@ Ketika pengguna menanyakan atau menyebutkan (*mention*) suatu direktori/folder:
 2. **Kandungan Anak Langsung (Level 1):** Berikan ringkasan singkat padat mengenai berkas atau subfolder yang berada langsung di dalamnya.
 3. **Kandungan Sub-Anak (Level 2):** Jika ada subfolder, jelaskan isinya lebih ringkas lagi (frasa atau peran kunci).
 4. **Kandungan Sub-Sub-Anak (Level 3):** Jika ada folder yang lebih dalam lagi, sebutkan hanya nama berkas/subfoldernya saja secara ringkas.
-5. **Kandungan Sangat Dalam (Level 4+):** Jika struktur sangat dalam, cukup sebutkan agregasi jumlah berkas dan foldernya saja (misal: *terdapat 6.236 berkas audio MP3*).
+5. **Kandungan Sangat Dalam (Level 4+):** Jika struktur sangat dalam, sebutkan agregasi jumlah berkas dan foldernya saja (misal: *terdapat 18.708 berkas audio MP3 EveryAyah*).
 
 ---
 
 ## 3. Mandat Rujukan Sumber Eksak (Path, Baris Awal & Baris Akhir)
 Setiap data teknis yang dicatat di memori maupun yang disampaikan kepada pengguna **WAJIB MENYERTAKAN RUJUKAN LOKASI EKSKLUSIF: PATH BERKAS, NOMOR BARIS AWAL, DAN NOMOR BARIS AKHIR**:
 - **Format:** `[path/to/file.ext#L<start>-L<end>](file:///d:/path/to/file.ext#L<start>-L<end>)`
-- **Contoh:** `[tools/master_bulk_downloader.py#L31-L36](file:///d:/Documents/quran-video-studio/tools/master_bulk_downloader.py#L31-L36)`
+- **Contoh:** `[tools/create_fatihah_master_videos.py#L78-L120](file:///d:/Documents/quran-video-studio/tools/create_fatihah_master_videos.py#L78-L120)`
 
 ---
 
-## 4. Standar Wajib Minimum: Kontrak 6 Pilar Literasi Tinggi (Tanpa Batas Maksimal)
-Setiap entitas yang dicatat di memori database SQLite (`agent_memory`) WAJIB memenuhi standar minimal 6 Pilar Literasi Penuh tanpa batas maksimal:
-1. **Identitas & Metadata Fisik:** Path, tipe entitas, ukuran berkas/volume, status lisensi, dan git governance (`.gitignore`).
-2. **Peran Arsitektur Hulu-Hilir:** Mengapa entitas ada, modul hulu (*upstream*) yang dipanggil, modul hilir (*downstream*) yang mengonsumsi, dan filosofi desainnya.
-3. **Kontrak Teknis & Skema Data Lengkap:** Signature fungsi lengkap dengan tipe data, rujukan baris eksak (`#Lstart-Lend`), skema kolom dataset (CSV/JSON), distribusi kategori, serta baris sampel nyata (AMAN vs KLAIM).
-4. **Kamus Istilah Awam Pengguna (*Colloquial Aliases*):** 3 s/d 7 frasa bahasa manusia santai untuk pencarian instan via SQLite FTS5.
-5. **Kandungan Progresif Bertingkat (Level 0 s/d Level 4+):** Rincian hierarki direktori secara mendalam dari root hingga agregasi ribuan berkas biner.
-6. **Batasan Mutlak & Gotchas (*Critical Guardrails*):** Larangan keras, jebakan teknis, dan prosedur mitigasi.
+## 4. Standar Wajib Minimum: Kontrak 6 Pilar Literasi 2x Lipat Eksplorasi Ekstrem (Tanpa Batas Maksimal)
+Setiap entitas yang dicatat di memori database SQLite (`agent_memory`) WAJIB memenuhi standar minimal **DUA KALI LIPAT LEBIH DALAM, PADAT, DAN RINCI** tanpa batas maksimal:
+1. **Identitas & Metadata Fisik Ekstrem:** Path absolut & relatif, format encoding, shebang, ukuran biner & format human-readable, jejak resource runtime (CPU/GPU/RAM), serta kebijakan git (.gitignore).
+2. **Peran Arsitektur Hulu-Hilir & Lifecycle Data (2x Lipat):** Mengapa modul ini diciptakan, modul hulu (*upstream*) pemanggil lengkap dengan argumen/protokol CDN/URL, modul hilir (*downstream*) pengonsumsi, artefak keluaran, dan filosofi desainnya.
+3. **Kontrak Teknis, Skema Data & Indeks Simbol Lengkap (`#Lstart-Lend`):**
+   - Signature fungsi lengkap dengan type hints, docstring asli, graf pemanggilan fungsi (*internal call graph*), deteksi efek samping (*side-effects* I/O, subprocess, console), dan tipe eksepsi yang ditangani.
+   - Skema kolom dataset tabular (CSV/JSON RFC 4180) dengan tipe data terinferensi, distribusi frekuensi status verifikasi empiris 100%, serta sampel baris nyata per-kategori.
+   - Pemetaan fase logika skrip utama yang terbagi hingga 16+ sub-blok berurutan dengan baris eksak `#Lstart-Lend`, input, output, dan kamus istilah awam.
+4. **Kamus Istilah Awam Pengguna (*Colloquial Aliases* Ekstensif):** 8 s/d 15 variasi sinonim percakapan alami, istilah teknis, frasa santai bahasa Indonesia/Inggris yang mungkin diketik pengguna saat mencari via SQLite FTS5.
+5. **Kandungan Progresif Bertingkat (Level 0 s/d Level 4+):** Rincian hierarki direktori secara mendalam dari root hingga agregasi puluhan ribu berkas biner, termasuk karakteristik multimedia (bitrate audio, sample rate, resolusi gambar, font typography).
+6. **Batasan Mutlak, Gotchas & Self-Healing Runbook:** Larangan keras, pantangan mutlak arsitektural, jebakan runtime (seperti penanganan font FFmpeg di Windows, filter ASS, buffer overflow), serta prosedur pemulihan otomatis jika terjadi anomali data.
 
 Standar di atas adalah **BATAS MINIMAL**. Agen AI wajib proaktif memperinci dan melipatgandakan kedalaman informasi setiap kali melakukan pendataan awal maupun pembelajaran berkelanjutan.
