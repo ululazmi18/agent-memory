@@ -43,19 +43,16 @@ class Scanner:
             # Prune ignored directories in-place agar tidak ditelusuri
             dirnames[:] = [d for d in dirnames if not self.should_ignore(curr_dir / d)]
 
-            if curr_dir == self.root:
-                continue
+            rel_path = curr_dir.relative_to(self.root).as_posix() if curr_dir != self.root else "."
+            level = len(Path(rel_path).parts) if rel_path != "." else 0
 
-            if self.should_ignore(curr_dir):
-                continue
+            # Record directory card (root was already recorded at start)
+            if curr_dir != self.root:
+                if self.should_ignore(curr_dir):
+                    continue
+                cards.append(self.scan_directory(curr_dir, level=level))
 
-            rel_path = curr_dir.relative_to(self.root).as_posix()
-            level = len(Path(rel_path).parts)
-
-            # Record directory card
-            cards.append(self.scan_directory(curr_dir, level=level))
-
-            # Record files
+            # Record files (including files in root directory!)
             for fname in filenames:
                 file_path = curr_dir / fname
                 if self.should_ignore(file_path):
