@@ -25,6 +25,8 @@ class SymbolDetail:
     colloquial_aliases: List[str] = field(default_factory=list)
     side_effects: str = ""
     error_handling: str = ""
+    calls: List[str] = field(default_factory=list)
+    decorators: List[str] = field(default_factory=list)
 
 @dataclass
 class EntityCard:

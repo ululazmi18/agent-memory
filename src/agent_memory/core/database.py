@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS symbols (
     end_line INTEGER NOT NULL,
     signature TEXT DEFAULT '',
     docstring TEXT DEFAULT '',
+    calls_json TEXT DEFAULT '[]',
+    decorators_json TEXT DEFAULT '[]',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(entity_path) REFERENCES entities(path) ON DELETE CASCADE,
     UNIQUE(entity_path, name, start_line)
@@ -101,10 +103,23 @@ class Database:
     def init_schema(self):
         with self.connection() as conn:
             conn.executescript(SCHEMA_SQL)
+            # Migration check: add columns if they do not exist in older DB schema
+            try:
+                conn.execute("ALTER TABLE symbols ADD COLUMN calls_json TEXT DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE symbols ADD COLUMN decorators_json TEXT DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass
+
+        # Auto-hydrate from knowledge seed if exists
+        seed_path = self.db_path.parent / "knowledge_seed.json"
+        if seed_path.exists():
+            self.apply_seed(seed_path)
 
     def upsert_entity(self, card: EntityCard):
         with self.connection() as conn:
-            # Check existing enrichments so we don't wipe out human/AI purpose
             existing = conn.execute(
                 "SELECT purpose, upstream, downstream, guardrails FROM entities WHERE path = ?",
                 (card.path,)
@@ -124,35 +139,36 @@ class Database:
                     level = excluded.level,
                     size_bytes = excluded.size_bytes,
                     hash_sha256 = excluded.hash_sha256,
-                    purpose = CASE WHEN excluded.purpose != '' THEN excluded.purpose ELSE entities.purpose END,
-                    upstream = CASE WHEN excluded.upstream != '' THEN excluded.upstream ELSE entities.upstream END,
-                    downstream = CASE WHEN excluded.downstream != '' THEN excluded.downstream ELSE entities.downstream END,
-                    guardrails = CASE WHEN excluded.guardrails != '' THEN excluded.guardrails ELSE entities.guardrails END,
+                    purpose = excluded.purpose,
+                    upstream = excluded.upstream,
+                    downstream = excluded.downstream,
+                    guardrails = excluded.guardrails,
                     child_summary = excluded.child_summary,
                     metadata_json = excluded.metadata_json,
                     updated_at = CURRENT_TIMESTAMP
             """, (
                 card.path, card.name, card.entity_type, card.level, card.size_bytes,
                 card.hash_sha256, purpose, upstream, downstream, guardrails,
-                card.child_summary, json.dumps(card.metadata)
+                card.child_summary, json.dumps(card.metadata, ensure_ascii=False)
             ))
 
-            # Upsert Symbols (AST updates lines without touching enrichments)
             for sym in card.symbols:
                 conn.execute("""
-                    INSERT INTO symbols (entity_path, name, symbol_type, start_line, end_line, signature, docstring, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    INSERT INTO symbols (entity_path, name, symbol_type, start_line, end_line, signature, docstring, calls_json, decorators_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(entity_path, name, start_line) DO UPDATE SET
                         symbol_type = excluded.symbol_type,
                         end_line = excluded.end_line,
                         signature = excluded.signature,
                         docstring = excluded.docstring,
+                        calls_json = excluded.calls_json,
+                        decorators_json = excluded.decorators_json,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
-                    card.path, sym.name, sym.symbol_type, sym.start_line, sym.end_line, sym.signature, sym.docstring
+                    card.path, sym.name, sym.symbol_type, sym.start_line, sym.end_line,
+                    sym.signature, sym.docstring, json.dumps(sym.calls), json.dumps(sym.decorators)
                 ))
 
-            # Upsert Logic Blocks
             if card.logic_blocks:
                 conn.execute("DELETE FROM logic_blocks WHERE entity_path = ?", (card.path,))
                 for blk in card.logic_blocks:
@@ -164,243 +180,7 @@ class Database:
                         json.dumps(blk.aliases), blk.inputs, blk.outputs
                     ))
 
-            # Rebuild FTS for this entity
             self._update_fts_index(conn, card.path)
-
-    def enrich_symbol(self, entity_path: str, symbol_name: str, purpose: str,
-                       logic_phases: List[str], colloquial_aliases: List[str],
-                       side_effects: str = "", error_handling: str = ""):
-        with self.connection() as conn:
-            conn.execute("""
-                INSERT INTO symbol_enrichments (entity_path, symbol_name, purpose, logic_phases_json, colloquial_aliases_json, side_effects, error_handling, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(entity_path, symbol_name) DO UPDATE SET
-                    purpose = excluded.purpose,
-                    logic_phases_json = excluded.logic_phases_json,
-                    colloquial_aliases_json = excluded.colloquial_aliases_json,
-                    side_effects = excluded.side_effects,
-                    error_handling = excluded.error_handling,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (
-                entity_path, symbol_name, purpose,
-                json.dumps(logic_phases), json.dumps(colloquial_aliases),
-                side_effects, error_handling
-            ))
-
-            for alias in colloquial_aliases:
-                conn.execute("""
-                    INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
-                    VALUES (?, ?, ?)
-                """, (entity_path, symbol_name, alias.lower().strip()))
-
-            self._update_fts_index(conn, entity_path)
-
-    def _update_fts_index(self, conn, path: str):
-        conn.execute("DELETE FROM fts_index WHERE target_path = ?", (path,))
-        
-        # Entity content
-        entity = conn.execute("SELECT * FROM entities WHERE path = ?", (path,)).fetchone()
-        if entity:
-            aliases = [r["alias"] for r in conn.execute("SELECT alias FROM aliases WHERE target_path = ?", (path,)).fetchall()]
-            content = f"{entity['name']} {entity['purpose']} {entity['upstream']} {entity['downstream']} {entity['guardrails']} {entity['child_summary']}"
-            conn.execute("""
-                INSERT INTO fts_index (target_path, target_name, content, aliases)
-                VALUES (?, '', ?, ?)
-            """, (path, content, " ".join(aliases)))
-
-        # Symbols
-        symbols = conn.execute("SELECT * FROM symbols WHERE entity_path = ?", (path,)).fetchall()
-        for sym in symbols:
-            enrichment = conn.execute(
-                "SELECT * FROM symbol_enrichments WHERE entity_path = ? AND symbol_name = ?",
-                (path, sym["name"])
-            ).fetchone()
-
-            sym_purpose = enrichment["purpose"] if enrichment else ""
-            sym_phases = " ".join(json.loads(enrichment["logic_phases_json"])) if enrichment else ""
-            sym_aliases = " ".join(json.loads(enrichment["colloquial_aliases_json"])) if enrichment else ""
-
-            content = f"{sym['name']} {sym['signature']} {sym['docstring']} {sym_purpose} {sym_phases}"
-            conn.execute("""
-                INSERT INTO fts_index (target_path, target_name, content, aliases)
-                VALUES (?, ?, ?, ?)
-            """, (path, sym["name"], content, sym_aliases))
-
-        # Logic blocks
-        blocks = conn.execute("SELECT * FROM logic_blocks WHERE entity_path = ?", (path,)).fetchall()
-        for blk in blocks:
-            blk_aliases = " ".join(json.loads(blk["aliases_json"]))
-            content = f"{blk['name']} {blk['purpose']} {blk['inputs']} {blk['outputs']}"
-            conn.execute("""
-                INSERT INTO fts_index (target_path, target_name, content, aliases)
-                VALUES (?, ?, ?, ?)
-            """, (path, blk["name"], content, blk_aliases))
-
-    def get_entity_card(self, path: str) -> Optional[EntityCard]:
-        # Normalize path
-        norm_path = path.replace("\\", "/").strip("/")
-        with self.connection() as conn:
-            # Try exact match or relative match
-            row = conn.execute("SELECT * FROM entities WHERE path = ? OR path LIKE ?", (norm_path, f"%/{norm_path}")).fetchone()
-            if not row:
-                return None
-
-            actual_path = row["path"]
-            sym_rows = conn.execute("SELECT * FROM symbols WHERE entity_path = ? ORDER BY start_line ASC", (actual_path,)).fetchall()
-            symbols = []
-            for s in sym_rows:
-                enr = conn.execute("SELECT * FROM symbol_enrichments WHERE entity_path = ? AND symbol_name = ?", (actual_path, s["name"])).fetchone()
-                symbols.append(SymbolDetail(
-                    name=s["name"],
-                    symbol_type=s["symbol_type"],
-                    start_line=s["start_line"],
-                    end_line=s["end_line"],
-                    signature=s["signature"],
-                    docstring=s["docstring"],
-                    purpose=enr["purpose"] if enr else "",
-                    logic_phases=json.loads(enr["logic_phases_json"]) if enr else [],
-                    colloquial_aliases=json.loads(enr["colloquial_aliases_json"]) if enr else [],
-                    side_effects=enr["side_effects"] if enr else "",
-                    error_handling=enr["error_handling"] if enr else ""
-                ))
-
-            blk_rows = conn.execute("SELECT * FROM logic_blocks WHERE entity_path = ? ORDER BY start_line ASC", (actual_path,)).fetchall()
-            logic_blocks = [
-                LogicBlock(
-                    name=b["name"],
-                    start_line=b["start_line"],
-                    end_line=b["end_line"],
-                    purpose=b["purpose"],
-                    aliases=json.loads(b["aliases_json"]),
-                    inputs=b["inputs"],
-                    outputs=b["outputs"]
-                ) for b in blk_rows
-            ]
-
-            alias_rows = conn.execute("SELECT alias FROM aliases WHERE target_path = ?", (actual_path,)).fetchall()
-            aliases = [a["alias"] for a in alias_rows]
-
-            return EntityCard(
-                path=row["path"],
-                name=row["name"],
-                entity_type=row["entity_type"],
-                level=row["level"],
-                size_bytes=row["size_bytes"],
-                hash_sha256=row["hash_sha256"],
-                purpose=row["purpose"],
-                upstream=row["upstream"],
-                downstream=row["downstream"],
-                guardrails=row["guardrails"],
-                child_summary=row["child_summary"],
-                symbols=symbols,
-                logic_blocks=logic_blocks,
-                aliases=aliases,
-                metadata=json.loads(row["metadata_json"]),
-                updated_at=row["updated_at"]
-            )
-
-    def find_by_intent(self, term: str) -> List[Dict[str, Any]]:
-        term_clean = term.strip().lower()
-        results = []
-        with self.connection() as conn:
-            # 1. Match FTS5
-            fts_rows = conn.execute("""
-                SELECT target_path, target_name, bm25(fts_index) as rank
-                FROM fts_index
-                WHERE fts_index MATCH ?
-                ORDER BY rank
-                LIMIT 10
-            """, (f'"{term_clean}"*',)).fetchall()
-
-            for r in fts_rows:
-                results.append({
-                    "path": r["target_path"],
-                    "target_name": r["target_name"],
-                    "match_score": round(abs(r["rank"]), 2)
-                })
-
-            # 2. Match exact alias
-            alias_rows = conn.execute("""
-                SELECT target_path, target_name FROM aliases
-                WHERE alias LIKE ? OR ? LIKE ('%' || alias || '%')
-            """, (f"%{term_clean}%", term_clean)).fetchall()
-
-            for a in alias_rows:
-                if not any(x["path"] == a["target_path"] and x["target_name"] == a["target_name"] for x in results):
-                    results.insert(0, {
-                        "path": a["target_path"],
-                        "target_name": a["target_name"],
-                        "match_score": 10.0
-                    })
-
-        return results
-
-    def get_symbol_detail(self, name_or_target: str) -> Optional[Tuple[SymbolDetail, str]]:
-        target_clean = name_or_target.strip().lower()
-        with self.connection() as conn:
-            # 1. Match by exact symbol name or qualified name
-            row = conn.execute("""
-                SELECT s.*, e.path as entity_path 
-                FROM symbols s 
-                JOIN entities e ON s.entity_path = e.path 
-                WHERE LOWER(s.name) = ? OR LOWER(s.name) LIKE ?
-                LIMIT 1
-            """, (target_clean, f"%.{target_clean}")).fetchone()
-
-            if not row:
-                # Try finding from aliases
-                alias_row = conn.execute("""
-                    SELECT target_path, target_name FROM aliases 
-                    WHERE alias = ? OR alias LIKE ?
-                    LIMIT 1
-                """, (target_clean, f"%{target_clean}%")).fetchone()
-                if alias_row and alias_row["target_name"]:
-                    row = conn.execute("""
-                        SELECT s.*, e.path as entity_path 
-                        FROM symbols s 
-                        JOIN entities e ON s.entity_path = e.path 
-                        WHERE s.entity_path = ? AND s.name = ?
-                    """, (alias_row["target_path"], alias_row["target_name"])).fetchone()
-
-            if not row:
-                return None
-
-            entity_path = row["entity_path"]
-            sym_name = row["name"]
-
-            enr = conn.execute("""
-                SELECT * FROM symbol_enrichments 
-                WHERE entity_path = ? AND symbol_name = ?
-            """, (entity_path, sym_name)).fetchone()
-
-            sym = SymbolDetail(
-                name=row["name"],
-                symbol_type=row["symbol_type"],
-                start_line=row["start_line"],
-                end_line=row["end_line"],
-                signature=row["signature"],
-                docstring=row["docstring"],
-                purpose=enr["purpose"] if enr else "",
-                logic_phases=json.loads(enr["logic_phases_json"]) if enr else [],
-                colloquial_aliases=json.loads(enr["colloquial_aliases_json"]) if enr else [],
-                side_effects=enr["side_effects"] if enr else "",
-                error_handling=enr["error_handling"] if enr else ""
-            )
-            return sym, entity_path
-
-    def set_logic_blocks(self, entity_path: str, blocks: list):
-        norm_path = entity_path.replace("\\", "/").strip("/")
-        with self.connection() as conn:
-            conn.execute("DELETE FROM logic_blocks WHERE entity_path = ?", (norm_path,))
-            for blk in blocks:
-                conn.execute("""
-                    INSERT INTO logic_blocks (entity_path, name, start_line, end_line, purpose, aliases_json, inputs, outputs, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """, (
-                    norm_path, blk.name, blk.start_line, blk.end_line, blk.purpose,
-                    json.dumps(blk.aliases), blk.inputs, blk.outputs
-                ))
-            self._update_fts_index(conn, norm_path)
 
     def upsert_entities_batch(self, cards: List[EntityCard]):
         with self.connection() as conn:
@@ -442,11 +222,12 @@ class Database:
                     conn.execute("DELETE FROM symbols WHERE entity_path = ?", (card.path,))
                     for sym in card.symbols:
                         conn.execute("""
-                            INSERT INTO symbols (entity_path, name, symbol_type, start_line, end_line, signature, docstring)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO symbols (entity_path, name, symbol_type, start_line, end_line, signature, docstring, calls_json, decorators_json)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             card.path, sym.name, sym.symbol_type,
-                            sym.start_line, sym.end_line, sym.signature, sym.docstring
+                            sym.start_line, sym.end_line, sym.signature, sym.docstring,
+                            json.dumps(sym.calls), json.dumps(sym.decorators)
                         ))
 
                 if card.logic_blocks:
@@ -460,9 +241,13 @@ class Database:
                             json.dumps(blk.aliases), blk.inputs, blk.outputs
                         ))
 
-                # Update FTS index only if entity has purpose, symbols, or is code/doc
                 if purpose or card.symbols or card.logic_blocks or card.entity_type in {"file_py", "file_csv", "file_json", "file_md", "dir"}:
                     self._update_fts_index(conn, card.path)
+
+        # Re-apply knowledge seed if available
+        seed_path = self.db_path.parent / "knowledge_seed.json"
+        if seed_path.exists():
+            self.apply_seed(seed_path)
 
     def enrich_entity(
         self,
@@ -496,3 +281,370 @@ class Database:
 
             self._update_fts_index(conn, entity_path)
 
+    def enrich_symbol(
+        self,
+        entity_path: str,
+        symbol_name: str,
+        purpose: str,
+        logic_phases: List[str],
+        colloquial_aliases: List[str],
+        side_effects: str = "",
+        error_handling: str = ""
+    ):
+        with self.connection() as conn:
+            conn.execute("""
+                INSERT INTO symbol_enrichments (entity_path, symbol_name, purpose, logic_phases_json, colloquial_aliases_json, side_effects, error_handling, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(entity_path, symbol_name) DO UPDATE SET
+                    purpose = excluded.purpose,
+                    logic_phases_json = excluded.logic_phases_json,
+                    colloquial_aliases_json = excluded.colloquial_aliases_json,
+                    side_effects = excluded.side_effects,
+                    error_handling = excluded.error_handling,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (
+                entity_path, symbol_name, purpose,
+                json.dumps(logic_phases), json.dumps(colloquial_aliases),
+                side_effects, error_handling
+            ))
+
+            for alias in colloquial_aliases:
+                conn.execute("""
+                    INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
+                    VALUES (?, ?, ?)
+                """, (entity_path, symbol_name, alias.lower().strip()))
+
+            self._update_fts_index(conn, entity_path)
+
+    def set_logic_blocks(self, entity_path: str, blocks: list):
+        norm_path = entity_path.replace("\\", "/").strip("/")
+        with self.connection() as conn:
+            conn.execute("DELETE FROM logic_blocks WHERE entity_path = ?", (norm_path,))
+            for blk in blocks:
+                conn.execute("""
+                    INSERT INTO logic_blocks (entity_path, name, start_line, end_line, purpose, aliases_json, inputs, outputs, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    norm_path, blk.name, blk.start_line, blk.end_line, blk.purpose,
+                    json.dumps(blk.aliases), blk.inputs, blk.outputs
+                ))
+            self._update_fts_index(conn, norm_path)
+
+    def _update_fts_index(self, conn, path: str):
+        conn.execute("DELETE FROM fts_index WHERE target_path = ?", (path,))
+
+        entity = conn.execute("SELECT * FROM entities WHERE path = ?", (path,)).fetchone()
+        if entity:
+            aliases = [r["alias"] for r in conn.execute("SELECT alias FROM aliases WHERE target_path = ?", (path,)).fetchall()]
+            
+            # Extract rich metadata keywords for FTS5
+            meta_tokens = []
+            if entity["metadata_json"]:
+                try:
+                    meta = json.loads(entity["metadata_json"])
+                    if "imports" in meta:
+                        imp = meta["imports"]
+                        meta_tokens.extend(imp.get("modules", []))
+                        meta_tokens.extend(imp.get("third_party", []))
+                        meta_tokens.extend(imp.get("local_project", []))
+                    if "constants" in meta:
+                        meta_tokens.extend([c.get("name", "") for c in meta["constants"]])
+                    if "cli_args" in meta:
+                        for arg in meta["cli_args"]:
+                            meta_tokens.extend(arg.get("flags", []))
+                    if "columns" in meta:
+                        meta_tokens.extend(meta["columns"])
+                except Exception:
+                    pass
+
+            extra_str = " ".join(meta_tokens)
+            content = f"{entity['name']} {entity['purpose']} {entity['upstream']} {entity['downstream']} {entity['guardrails']} {entity['child_summary']} {extra_str}"
+            conn.execute("""
+                INSERT INTO fts_index (target_path, target_name, content, aliases)
+                VALUES (?, '', ?, ?)
+            """, (path, content, " ".join(aliases)))
+
+        symbols = conn.execute("SELECT * FROM symbols WHERE entity_path = ?", (path,)).fetchall()
+        for sym in symbols:
+            enrichment = conn.execute(
+                "SELECT * FROM symbol_enrichments WHERE entity_path = ? AND symbol_name = ?",
+                (path, sym["name"])
+            ).fetchone()
+
+            sym_purpose = enrichment["purpose"] if enrichment else ""
+            sym_phases = " ".join(json.loads(enrichment["logic_phases_json"])) if enrichment else ""
+            sym_aliases = " ".join(json.loads(enrichment["colloquial_aliases_json"])) if enrichment else ""
+            calls_str = " ".join(json.loads(sym["calls_json"])) if "calls_json" in sym.keys() and sym["calls_json"] else ""
+
+            content = f"{sym['name']} {sym['signature']} {sym['docstring']} {sym_purpose} {sym_phases} {calls_str}"
+            conn.execute("""
+                INSERT INTO fts_index (target_path, target_name, content, aliases)
+                VALUES (?, ?, ?, ?)
+            """, (path, sym["name"], content, sym_aliases))
+
+        blocks = conn.execute("SELECT * FROM logic_blocks WHERE entity_path = ?", (path,)).fetchall()
+        for blk in blocks:
+            blk_aliases = " ".join(json.loads(blk["aliases_json"]))
+            content = f"{blk['name']} {blk['purpose']} {blk['inputs']} {blk['outputs']}"
+            conn.execute("""
+                INSERT INTO fts_index (target_path, target_name, content, aliases)
+                VALUES (?, ?, ?, ?)
+            """, (path, blk["name"], content, blk_aliases))
+
+    def get_entity_card(self, path: str) -> Optional[EntityCard]:
+        norm_path = path.replace("\\", "/").strip("/")
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM entities WHERE path = ? OR path LIKE ?", (norm_path, f"%/{norm_path}")).fetchone()
+            if not row:
+                return None
+
+            actual_path = row["path"]
+            sym_rows = conn.execute("SELECT * FROM symbols WHERE entity_path = ? ORDER BY start_line ASC", (actual_path,)).fetchall()
+            symbols = []
+            for s in sym_rows:
+                enr = conn.execute(
+                    "SELECT * FROM symbol_enrichments WHERE entity_path = ? AND symbol_name = ?",
+                    (actual_path, s["name"])
+                ).fetchone()
+
+                calls = json.loads(s["calls_json"]) if "calls_json" in s.keys() and s["calls_json"] else []
+                decs = json.loads(s["decorators_json"]) if "decorators_json" in s.keys() and s["decorators_json"] else []
+
+                symbols.append(SymbolDetail(
+                    name=s["name"],
+                    symbol_type=s["symbol_type"],
+                    start_line=s["start_line"],
+                    end_line=s["end_line"],
+                    signature=s["signature"],
+                    docstring=s["docstring"],
+                    purpose=enr["purpose"] if enr else "",
+                    logic_phases=json.loads(enr["logic_phases_json"]) if enr else [],
+                    colloquial_aliases=json.loads(enr["colloquial_aliases_json"]) if enr else [],
+                    side_effects=enr["side_effects"] if enr else "",
+                    error_handling=enr["error_handling"] if enr else "",
+                    calls=calls,
+                    decorators=decs
+                ))
+
+            blk_rows = conn.execute("SELECT * FROM logic_blocks WHERE entity_path = ? ORDER BY start_line ASC", (actual_path,)).fetchall()
+            logic_blocks = []
+            for b in blk_rows:
+                logic_blocks.append(LogicBlock(
+                    name=b["name"],
+                    start_line=b["start_line"],
+                    end_line=b["end_line"],
+                    purpose=b["purpose"],
+                    aliases=json.loads(b["aliases_json"]),
+                    inputs=b["inputs"],
+                    outputs=b["outputs"]
+                ))
+
+            alias_rows = conn.execute("SELECT alias FROM aliases WHERE target_path = ? AND target_name = ''", (actual_path,)).fetchall()
+            aliases = [a["alias"] for a in alias_rows]
+
+            return EntityCard(
+                path=row["path"],
+                name=row["name"],
+                entity_type=row["entity_type"],
+                level=row["level"],
+                size_bytes=row["size_bytes"],
+                hash_sha256=row["hash_sha256"],
+                purpose=row["purpose"],
+                upstream=row["upstream"],
+                downstream=row["downstream"],
+                guardrails=row["guardrails"],
+                child_summary=row["child_summary"],
+                symbols=symbols,
+                logic_blocks=logic_blocks,
+                aliases=aliases,
+                metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+                updated_at=row["updated_at"]
+            )
+
+    def find_by_intent(self, intent_text: str, limit: int = 10) -> List[Dict[str, Any]]:
+        clean = intent_text.strip().replace("'", "").replace('"', "")
+        if not clean:
+            return []
+
+        fts_query = " OR ".join([f'"{tok}"*' for tok in clean.split() if len(tok) >= 2])
+        if not fts_query:
+            fts_query = f'"{clean}"'
+
+        results = []
+        with self.connection() as conn:
+            # 1. Alias exact/wildcard match
+            alias_matches = conn.execute("""
+                SELECT a.target_path, a.target_name, a.alias, e.purpose, e.entity_type
+                FROM aliases a
+                JOIN entities e ON a.target_path = e.path
+                WHERE a.alias LIKE ? OR a.alias LIKE ?
+                LIMIT ?
+            """, (f"%{clean.lower()}%", f"{clean.lower()}%", limit)).fetchall()
+
+            for r in alias_matches:
+                results.append({
+                    "path": r["target_path"],
+                    "target_name": r["target_name"],
+                    "match_type": "alias",
+                    "details": f"Cocok dengan alias awam '{r['alias']}' | {r['purpose'][:100]}",
+                    "match_score": 10.0
+                })
+
+            # 2. FTS5 query
+            try:
+                fts_rows = conn.execute("""
+                    SELECT f.target_path, f.target_name, snippet(fts_index, 2, '<b>', '</b>', '...', 15) as snip, rank
+                    FROM fts_index f
+                    WHERE fts_index MATCH ?
+                    ORDER BY rank ASC
+                    LIMIT ?
+                """, (fts_query, limit)).fetchall()
+
+                for r in fts_rows:
+                    if not any(res["path"] == r["target_path"] and res.get("target_name") == r["target_name"] for res in results):
+                        results.append({
+                            "path": r["target_path"],
+                            "target_name": r["target_name"],
+                            "match_type": "fts5",
+                            "details": r["snip"],
+                            "match_score": round(-float(r["rank"]), 2)
+                        })
+            except sqlite3.OperationalError:
+                pass
+
+        return results[:limit]
+
+    def get_symbol_detail(self, symbol_name: str) -> Optional[Tuple[SymbolDetail, str]]:
+        target_clean = symbol_name.strip().lower()
+        with self.connection() as conn:
+            row = conn.execute("""
+                SELECT s.*, e.path as entity_path 
+                FROM symbols s 
+                JOIN entities e ON s.entity_path = e.path 
+                WHERE LOWER(s.name) = ? OR LOWER(s.name) LIKE ?
+                LIMIT 1
+            """, (target_clean, f"%.{target_clean}")).fetchone()
+
+            if not row:
+                alias_row = conn.execute("""
+                    SELECT target_path, target_name FROM aliases 
+                    WHERE alias = ? OR alias LIKE ?
+                    LIMIT 1
+                """, (target_clean, f"%{target_clean}%")).fetchone()
+                if alias_row and alias_row["target_name"]:
+                    row = conn.execute("""
+                        SELECT s.*, e.path as entity_path 
+                        FROM symbols s 
+                        JOIN entities e ON s.entity_path = e.path 
+                        WHERE s.entity_path = ? AND s.name = ?
+                    """, (alias_row["target_path"], alias_row["target_name"])).fetchone()
+
+            if not row:
+                return None
+
+            entity_path = row["entity_path"]
+            sym_name = row["name"]
+
+            enr = conn.execute("""
+                SELECT * FROM symbol_enrichments 
+                WHERE entity_path = ? AND symbol_name = ?
+            """, (entity_path, sym_name)).fetchone()
+
+            calls = json.loads(row["calls_json"]) if "calls_json" in row.keys() and row["calls_json"] else []
+            decs = json.loads(row["decorators_json"]) if "decorators_json" in row.keys() and row["decorators_json"] else []
+
+            sym = SymbolDetail(
+                name=row["name"],
+                symbol_type=row["symbol_type"],
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+                signature=row["signature"],
+                docstring=row["docstring"],
+                purpose=enr["purpose"] if enr else "",
+                logic_phases=json.loads(enr["logic_phases_json"]) if enr else [],
+                colloquial_aliases=json.loads(enr["colloquial_aliases_json"]) if enr else [],
+                side_effects=enr["side_effects"] if enr else "",
+                error_handling=enr["error_handling"] if enr else "",
+                calls=calls,
+                decorators=decs
+            )
+            return sym, entity_path
+
+    def apply_seed(self, seed_path: Optional[Path] = None):
+        if seed_path is None:
+            seed_path = self.db_path.parent / "knowledge_seed.json"
+        if not seed_path.exists():
+            return
+        try:
+            data = json.loads(seed_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        with self.connection() as conn:
+            for item in data.get("entities", []):
+                p = item.get("path")
+                if not p:
+                    continue
+                conn.execute("""
+                    UPDATE entities SET
+                        purpose = COALESCE(NULLIF(?, ''), purpose),
+                        upstream = COALESCE(NULLIF(?, ''), upstream),
+                        downstream = COALESCE(NULLIF(?, ''), downstream),
+                        guardrails = COALESCE(NULLIF(?, ''), guardrails),
+                        child_summary = COALESCE(NULLIF(?, ''), child_summary),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE path = ?
+                """, (
+                    item.get("purpose", ""),
+                    item.get("upstream", ""),
+                    item.get("downstream", ""),
+                    item.get("guardrails", ""),
+                    item.get("child_summary", ""),
+                    p
+                ))
+
+                if item.get("aliases"):
+                    for a in item["aliases"]:
+                        conn.execute("""
+                            INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
+                            VALUES (?, '', ?)
+                        """, (p, a.lower().strip()))
+
+                if item.get("logic_blocks"):
+                    conn.execute("DELETE FROM logic_blocks WHERE entity_path = ?", (p,))
+                    for blk in item["logic_blocks"]:
+                        conn.execute("""
+                            INSERT INTO logic_blocks (entity_path, name, start_line, end_line, purpose, aliases_json, inputs, outputs, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """, (
+                            p, blk.get("name", ""), blk.get("start_line", 0), blk.get("end_line", 0),
+                            blk.get("purpose", ""), json.dumps(blk.get("aliases", [])),
+                            blk.get("inputs", ""), blk.get("outputs", "")
+                        ))
+
+                if item.get("symbols"):
+                    for s in item["symbols"]:
+                        s_name = s.get("name")
+                        conn.execute("""
+                            INSERT INTO symbol_enrichments (entity_path, symbol_name, purpose, logic_phases_json, colloquial_aliases_json, side_effects, error_handling, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            ON CONFLICT(entity_path, symbol_name) DO UPDATE SET
+                                purpose = excluded.purpose,
+                                logic_phases_json = excluded.logic_phases_json,
+                                colloquial_aliases_json = excluded.colloquial_aliases_json,
+                                side_effects = excluded.side_effects,
+                                error_handling = excluded.error_handling,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (
+                            p, s_name, s.get("purpose", ""),
+                            json.dumps(s.get("logic_phases", [])),
+                            json.dumps(s.get("colloquial_aliases", [])),
+                            s.get("side_effects", ""), s.get("error_handling", "")
+                        ))
+                        for a in s.get("colloquial_aliases", []):
+                            conn.execute("""
+                                INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
+                                VALUES (?, ?, ?)
+                            """, (p, s_name, a.lower().strip()))
+
+                self._update_fts_index(conn, p)

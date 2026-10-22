@@ -35,51 +35,90 @@ class TerminalFormatter:
             out.append(f"🗣️  [Pilar 4: Kamus Istilah Awam Pengguna (Colloquial Aliases)]:")
             out.append(f"   {', '.join(card.aliases)}")
 
-        # Pilar 3: Skema Data Khusus CSV
-        if card.entity_type == "file_csv" and card.metadata:
-            out.append(f"\n📊 [Pilar 3: Skema Data & Kontrak Tabular]:")
-            cols = card.metadata.get("columns", [])
-            col_details = card.metadata.get("column_definitions", {})
-            rows_count = card.metadata.get("rows_count", 0)
-            breakdown = card.metadata.get("breakdown", {})
-            sample = card.metadata.get("sample", [])
-            sample_aman = card.metadata.get("sample_aman", [])
-            sample_klaim = card.metadata.get("sample_klaim", [])
-            
-            out.append(f"   • Total Baris Data : {rows_count} record terdaftar")
-            if breakdown:
-                out.append(f"   • Distribusi Status:")
-                for k, v in breakdown.items():
-                    out.append(f"     - {k}: {v}")
-            out.append(f"   • Jumlah Kolom     : {len(cols)} kolom")
-            
-            if col_details:
-                out.append(f"   • Spesifikasi Rinci 10 Kolom:")
-                for c_name, c_desc in col_details.items():
-                    out.append(f"     [{c_name}] -> {c_desc}")
-            else:
-                out.append(f"   • Daftar Kolom     : {', '.join(cols)}")
-                
-            if sample_aman:
-                out.append(f"   • Sampel Baris AMAN   : {sample_aman}")
-            elif sample:
-                out.append(f"   • Sampel Baris 1      : {sample}")
-            if sample_klaim:
-                out.append(f"   • Sampel Baris KLAIM  : {sample_klaim}")
-
-        elif card.entity_type == "file_json" and card.metadata:
-            out.append(f"\n📊 [Pilar 3: Skema Struktur JSON]:")
-            out.append(f"   • Tipe Data        : {card.metadata.get('type')}")
-            if "keys" in card.metadata:
-                out.append(f"   • Kunci Utama      : {', '.join(card.metadata.get('keys', []))}")
-            if "count" in card.metadata:
-                out.append(f"   • Total Item       : {card.metadata.get('count')}")
-
         # Pilar 5: Kandungan Direktori Bertingkat (Progressive Depth Level 0 - 4+)
         if card.child_summary:
             out.append(f"\n📂 [Pilar 5: Kandungan Direktori Bertingkat (Progressive Depth Level 0-4+)]:")
             for line in card.child_summary.strip().split("\n"):
                 out.append(f"   {line}")
+
+        # Pilar 3 (Python): Dependensi & Metadata AST (0-Token)
+        if card.entity_type == "file_py" and card.metadata:
+            meta = card.metadata
+            imports = meta.get("imports", {})
+            constants = meta.get("constants", [])
+            cli_args = meta.get("cli_args", [])
+            metrics = meta.get("metrics", {})
+
+            if imports.get("third_party") or imports.get("local_project") or imports.get("modules"):
+                out.append(f"\n📦 [Pilar 3: Dependensi & Modul Eksternal (AST 0-Token)]:")
+                if imports.get("local_project"):
+                    out.append(f"   • Proyek Lokal  : {', '.join(imports['local_project'])}")
+                if imports.get("third_party"):
+                    out.append(f"   • Third-Party   : {', '.join(imports['third_party'])}")
+                if imports.get("modules"):
+                    std_mods = [m for m in imports["modules"] if m not in imports.get("third_party", []) and m not in imports.get("local_project", [])]
+                    if std_mods:
+                        out.append(f"   • Modul Standar : {', '.join(std_mods[:10])}")
+
+            if constants:
+                out.append(f"\n🧱 [Pilar 3: Konstanta Global & Konfigurasi Path]:")
+                for c in constants[:8]:
+                    out.append(f"   • L{c.get('line', '?')}: {c.get('name')} = {c.get('value')}")
+
+            if cli_args:
+                out.append(f"\n⌨️  [Pilar 3: Antarmuka Argparse CLI ({len(cli_args)} opsi terdeteksi)]:")
+                for arg in cli_args:
+                    flags_str = "/".join(arg.get("flags", []))
+                    default_str = f" [default: {arg.get('default')}]" if arg.get("default") else ""
+                    help_str = f" - {arg.get('help')}" if arg.get("help") else ""
+                    out.append(f"   • {flags_str} ({arg.get('type')}){default_str}{help_str}")
+
+            if metrics:
+                out.append(f"\n📐 [Pilar 3: Metrik Kode Program]:")
+                out.append(f"   • Total: {metrics.get('total_lines')} baris | Kode: {metrics.get('code_lines')} baris | Komentar: {metrics.get('comment_lines')} baris | Kosong: {metrics.get('blank_lines')} baris")
+
+        # Pilar 3 (CSV): Skema Tabular & Distribusi
+        elif card.entity_type == "file_csv" and card.metadata:
+            out.append(f"\n📊 [Pilar 3: Skema Data & Kontrak Tabular RFC 4180]:")
+            cols = card.metadata.get("columns", [])
+            col_details = card.metadata.get("column_definitions", {})
+            rows_count = card.metadata.get("rows_count", 0)
+            col_types = card.metadata.get("column_types", {})
+            cat_dists = card.metadata.get("categorical_distributions", {})
+            sample_by_cat = card.metadata.get("sample_rows_by_category", {})
+            
+            out.append(f"   • Total Baris Data : {rows_count} record terdaftar")
+            out.append(f"   • Jumlah Kolom     : {len(cols)} kolom")
+
+            if cat_dists:
+                out.append(f"   • Distribusi Kategori Empiris (0-Token Scanner):")
+                for col_name, dist in cat_dists.items():
+                    dist_str = ", ".join(f"'{k}': {v}" for k, v in dist.items())
+                    out.append(f"     - [{col_name}]: {dist_str}")
+
+            if col_details:
+                out.append(f"   • Spesifikasi Rinci Kolom:")
+                for c_name, c_desc in col_details.items():
+                    out.append(f"     [{c_name}] -> {c_desc}")
+            elif cols:
+                cols_with_types = [f"{c} ({col_types.get(c, 'str')})" for c in cols]
+                out.append(f"   • Kolom & Tipe     : {', '.join(cols_with_types[:8])}")
+
+            if sample_by_cat:
+                out.append(f"   • Sampel Baris per Kategori:")
+                for cat_title, s_row in list(sample_by_cat.items())[:3]:
+                    out.append(f"     [{cat_title}] -> {s_row}")
+
+        # Pilar 3 (JSON): Skema Struktur
+        elif card.entity_type == "file_json" and card.metadata:
+            out.append(f"\n📊 [Pilar 3: Skema Struktur JSON]:")
+            out.append(f"   • Tipe Data        : {card.metadata.get('type')}")
+            if "keys" in card.metadata:
+                out.append(f"   • Kunci Utama      : {', '.join(card.metadata.get('keys', []))}")
+            if "total_items" in card.metadata:
+                out.append(f"   • Total Item       : {card.metadata.get('total_items')}")
+            if "item_fields" in card.metadata:
+                out.append(f"   • Field per Elemen : {', '.join(card.metadata.get('item_fields', []))}")
 
         # Simbol & Fungsi Teknis Mendalam
         if card.symbols:
@@ -93,6 +132,8 @@ class TerminalFormatter:
                     out.append(f"  │   Peran     : {s.purpose}")
                 if s.colloquial_aliases:
                     out.append(f"  │   Alias     : {', '.join(s.colloquial_aliases)}")
+                if s.calls:
+                    out.append(f"  │   Calls     : {', '.join(s.calls[:8])}")
                 if s.logic_phases:
                     out.append(f"  │   Fase Alur :")
                     for p in s.logic_phases:
@@ -131,6 +172,8 @@ class TerminalFormatter:
             out.append(f"✍️  [Signature / Kontrak Teknis]:\n   {sym.signature}")
         if sym.colloquial_aliases:
             out.append(f"🗣️  [Istilah Awam Pengguna (Colloquial Aliases)]:\n   {', '.join(sym.colloquial_aliases)}")
+        if sym.calls:
+            out.append(f"📞 [Internal Call Graph / Fungsi yang Dipanggil]:\n   {', '.join(sym.calls)}")
         if sym.docstring:
             out.append(f"📖 [Docstring Asli Kode]:\n   {sym.docstring.strip()}")
         if sym.logic_phases:
