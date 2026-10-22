@@ -226,6 +226,16 @@ class Database:
                 VALUES (?, ?, ?, ?)
             """, (path, sym["name"], content, sym_aliases))
 
+        # Logic blocks
+        blocks = conn.execute("SELECT * FROM logic_blocks WHERE entity_path = ?", (path,)).fetchall()
+        for blk in blocks:
+            blk_aliases = " ".join(json.loads(blk["aliases_json"]))
+            content = f"{blk['name']} {blk['purpose']} {blk['inputs']} {blk['outputs']}"
+            conn.execute("""
+                INSERT INTO fts_index (target_path, target_name, content, aliases)
+                VALUES (?, ?, ?, ?)
+            """, (path, blk["name"], content, blk_aliases))
+
     def get_entity_card(self, path: str) -> Optional[EntityCard]:
         # Normalize path
         norm_path = path.replace("\\", "/").strip("/")
@@ -477,15 +487,12 @@ class Database:
             """, (purpose, upstream, downstream, guardrails, child_summary, entity_path))
 
             if aliases:
-                # Record aliases in logic_blocks for FTS search
-                conn.execute("""
-                    INSERT INTO logic_blocks (entity_path, name, start_line, end_line, purpose, aliases_json, updated_at)
-                    VALUES (?, 'Colloquial Aliases', 1, 1, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(entity_path, name) DO UPDATE SET
-                        aliases_json = excluded.aliases_json,
-                        purpose = excluded.purpose,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (entity_path, purpose[:100], json.dumps(aliases, ensure_ascii=False)))
+                conn.execute("DELETE FROM aliases WHERE target_path = ? AND target_name = ''", (entity_path,))
+                for a in aliases:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
+                        VALUES (?, '', ?)
+                    """, (entity_path, a.lower().strip()))
 
             self._update_fts_index(conn, entity_path)
 
