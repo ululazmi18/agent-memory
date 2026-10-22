@@ -49,8 +49,7 @@ def main():
     if args.sync or not db_path.exists():
         scanner = Scanner(workspace)
         cards = scanner.scan_all()
-        for c in cards:
-            db.upsert_entity(c)
+        db.upsert_entities_batch(cards)
         if args.sync and not (args.query or args.find or args.info or args.context or args.blocks):
             print(f"✅ Sinkronisasi tuntas: {len(cards)} entitas tercatat di {db_path}")
             return 0

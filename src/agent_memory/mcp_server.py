@@ -24,8 +24,8 @@ def get_db() -> Database:
         count = conn.execute("SELECT count(*) as c FROM entities").fetchone()["c"]
         if count == 0:
             scanner = Scanner(workspace)
-            for c in scanner.scan_all():
-                db.upsert_entity(c)
+            cards = scanner.scan_all()
+            db.upsert_entities_batch(cards)
     return db
 
 @mcp.tool()
@@ -67,17 +67,26 @@ def memory_get_phase_map(file_path: str) -> str:
 @mcp.tool()
 def memory_enrich_knowledge(
     entity_path: str,
-    symbol_name: str,
     purpose: str,
-    logic_phases: List[str],
     colloquial_aliases: List[str],
+    symbol_name: str = "",
+    logic_phases: Optional[List[str]] = None,
+    upstream: str = "",
+    downstream: str = "",
+    guardrails: str = "",
+    child_summary: str = "",
     side_effects: str = "",
     error_handling: str = ""
 ) -> str:
-    """Menyimpan pemahaman mendalam AI tentang suatu fungsi/simbol. Memvalidasi kepatuhan 6 Pilar Literasi Tinggi."""
+    """Menyimpan pemahaman mendalam AI tentang suatu file/folder atau fungsi/simbol. Menegakkan Kontrak 6 Pilar Literasi Tinggi."""
+    phases = logic_phases or []
+    # Jika simbol diisi, fase logika wajib minimal 2
+    if symbol_name and len(phases) < 2:
+        return f"❌ Input ditolak oleh Quality Gate Validator:\n- Simbol {symbol_name} membutuhkan minimal 2 fase logika internal."
+
     is_valid, errors = QualityGateValidator.validate_enrichment(
         purpose=purpose,
-        logic_phases=logic_phases,
+        logic_phases=phases if symbol_name else ["Phase 1: Ingestion", "Phase 2: Execution"],
         colloquial_aliases=colloquial_aliases
     )
 
@@ -85,16 +94,28 @@ def memory_enrich_knowledge(
         return f"❌ Input ditolak oleh Quality Gate Validator:\n" + "\n".join(f"- {e}" for e in errors)
 
     db = get_db()
-    db.enrich_symbol(
-        entity_path=entity_path,
-        symbol_name=symbol_name,
-        purpose=purpose,
-        logic_phases=logic_phases,
-        colloquial_aliases=colloquial_aliases,
-        side_effects=side_effects,
-        error_handling=error_handling
-    )
-    return f"✅ Berhasil mencatat wawasan permanen untuk {entity_path} -> {symbol_name}."
+    if symbol_name:
+        db.enrich_symbol(
+            entity_path=entity_path,
+            symbol_name=symbol_name,
+            purpose=purpose,
+            logic_phases=phases,
+            colloquial_aliases=colloquial_aliases,
+            side_effects=side_effects,
+            error_handling=error_handling
+        )
+        return f"✅ Berhasil mencatat wawasan berliterasi tinggi untuk simbol: {entity_path} -> {symbol_name}."
+    else:
+        db.enrich_entity(
+            entity_path=entity_path,
+            purpose=purpose,
+            upstream=upstream,
+            downstream=downstream,
+            guardrails=guardrails,
+            child_summary=child_summary,
+            aliases=colloquial_aliases
+        )
+        return f"✅ Berhasil mencatat Kartu Identitas 6 Pilar Literasi Tinggi untuk entitas: {entity_path}."
 
 @mcp.tool()
 def memory_sync_codebase() -> str:
@@ -103,8 +124,7 @@ def memory_sync_codebase() -> str:
     db = get_db()
     scanner = Scanner(workspace)
     cards = scanner.scan_all()
-    for c in cards:
-        db.upsert_entity(c)
+    db.upsert_entities_batch(cards)
     return f"✅ Sinkronisasi sukses: {len(cards)} entitas diperbarui di basis data memori."
 
 def main():

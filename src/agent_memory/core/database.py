@@ -453,3 +453,39 @@ class Database:
                 # Update FTS index only if entity has purpose, symbols, or is code/doc
                 if purpose or card.symbols or card.logic_blocks or card.entity_type in {"file_py", "file_csv", "file_json", "file_md", "dir"}:
                     self._update_fts_index(conn, card.path)
+
+    def enrich_entity(
+        self,
+        entity_path: str,
+        purpose: str,
+        upstream: str = "",
+        downstream: str = "",
+        guardrails: str = "",
+        child_summary: str = "",
+        aliases: Optional[List[str]] = None
+    ):
+        with self.connection() as conn:
+            conn.execute("""
+                UPDATE entities SET
+                    purpose = COALESCE(NULLIF(?, ''), purpose),
+                    upstream = COALESCE(NULLIF(?, ''), upstream),
+                    downstream = COALESCE(NULLIF(?, ''), downstream),
+                    guardrails = COALESCE(NULLIF(?, ''), guardrails),
+                    child_summary = COALESCE(NULLIF(?, ''), child_summary),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE path = ?
+            """, (purpose, upstream, downstream, guardrails, child_summary, entity_path))
+
+            if aliases:
+                # Record aliases in logic_blocks for FTS search
+                conn.execute("""
+                    INSERT INTO logic_blocks (entity_path, name, start_line, end_line, purpose, aliases_json, updated_at)
+                    VALUES (?, 'Colloquial Aliases', 1, 1, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(entity_path, name) DO UPDATE SET
+                        aliases_json = excluded.aliases_json,
+                        purpose = excluded.purpose,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (entity_path, purpose[:100], json.dumps(aliases, ensure_ascii=False)))
+
+            self._update_fts_index(conn, entity_path)
+
