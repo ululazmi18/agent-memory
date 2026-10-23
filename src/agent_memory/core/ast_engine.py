@@ -156,7 +156,7 @@ class ASTEngine:
                         name="Entrypoint: if __name__ == '__main__'",
                         start_line=node.lineno,
                         end_line=node.end_lineno or node.lineno,
-                        purpose="Blok eksekusi utama saat skrip dijalankan mandiri via terminal"
+                        purpose="Main execution entrypoint when invoked standalone via CLI/terminal"
                     ))
 
         # 3. Detect CLI arguments across the entire AST

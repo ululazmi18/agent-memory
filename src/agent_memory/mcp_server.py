@@ -30,7 +30,7 @@ def get_db() -> Database:
 
 @mcp.tool()
 def memory_batch_inspect(targets: List[str]) -> str:
-    """Mengambil Kartu Identitas lengkap untuk banyak folder dan berkas sekaligus dalam 1 panggilan (Multi-Query)."""
+    """Fetch complete High-Density Identity Cards for multiple folders and files in a single call (Multi-Query)."""
     db = get_db()
     results = []
     for t in targets:
@@ -43,7 +43,7 @@ def memory_batch_inspect(targets: List[str]) -> str:
 
 @mcp.tool()
 def memory_find_by_intent(terms: List[str]) -> str:
-    """Mencari simbol, berkas, atau baris kode eksak berdasarkan bahasa awam/istilah manusia sehari-hari."""
+    """Search symbols, files, or exact code blocks using natural human language, Indonesian colloquial slang, command habits, or typos."""
     db = get_db()
     results = []
     for term in terms:
@@ -53,7 +53,7 @@ def memory_find_by_intent(terms: List[str]) -> str:
 
 @mcp.tool()
 def memory_get_phase_map(file_path: str) -> str:
-    """Mengambil pemetaan blok fase logika internal suatu skrip secara mendalam dari awal sampai akhir."""
+    """Retrieve detailed internal logic execution phase map for a script from start to finish without reading raw code."""
     db = get_db()
     card = db.get_entity_card(file_path)
     if not card or not card.logic_blocks:
@@ -67,8 +67,8 @@ def memory_get_phase_map(file_path: str) -> str:
 @mcp.tool()
 def memory_enrich_knowledge(
     entity_path: str,
-    purpose: str,
-    colloquial_aliases: List[str],
+    purpose: str = "",
+    colloquial_aliases: Optional[List[str]] = None,
     symbol_name: str = "",
     logic_phases: Optional[List[str]] = None,
     upstream: str = "",
@@ -76,18 +76,25 @@ def memory_enrich_knowledge(
     guardrails: str = "",
     child_summary: str = "",
     side_effects: str = "",
-    error_handling: str = ""
+    error_handling: str = "",
+    merge_mode: str = "merge"
 ) -> str:
-    """Menyimpan pemahaman mendalam AI tentang suatu file/folder atau fungsi/simbol. Menegakkan Kontrak 6 Pilar Literasi Tinggi."""
+    """Save deep understanding of a file/folder or function/symbol. MANDATORY: Write technical specs (purpose, logic_phases, upstream, downstream, guardrails, side_effects, error_handling) in High-Density Technical English (saves 40% tokens). MANDATORY: Write colloquial_aliases in natural Indonesian user habits/slang for instant FTS5 matching."""
+    db = get_db()
+    existing_card = db.get_entity_card(entity_path)
+    existing_purpose = existing_card.purpose if existing_card else ""
+    existing_aliases_count = len(existing_card.aliases) if existing_card else 0
+    
     phases = logic_phases or []
-    # Jika simbol diisi, fase logika wajib minimal 2
-    if symbol_name and len(phases) < 2:
-        return f"❌ Input ditolak oleh Quality Gate Validator:\n- Simbol {symbol_name} membutuhkan minimal 2 fase logika internal."
-
+    aliases_list = colloquial_aliases or []
+    
+    # Granular Field-Level Validation (Allows updating only guardrails or aliases if purpose already exists)
     is_valid, errors = QualityGateValidator.validate_enrichment(
         purpose=purpose,
         logic_phases=phases if symbol_name else ["Phase 1: Ingestion", "Phase 2: Execution"],
-        colloquial_aliases=colloquial_aliases
+        colloquial_aliases=aliases_list,
+        existing_purpose=existing_purpose,
+        existing_aliases_count=existing_aliases_count
     )
 
     if not is_valid:
@@ -100,9 +107,10 @@ def memory_enrich_knowledge(
             symbol_name=symbol_name,
             purpose=purpose,
             logic_phases=phases,
-            colloquial_aliases=colloquial_aliases,
+            colloquial_aliases=aliases_list,
             side_effects=side_effects,
-            error_handling=error_handling
+            error_handling=error_handling,
+            merge_mode=merge_mode
         )
         return f"✅ Berhasil mencatat wawasan berliterasi tinggi untuk simbol: {entity_path} -> {symbol_name}."
     else:
@@ -113,13 +121,14 @@ def memory_enrich_knowledge(
             downstream=downstream,
             guardrails=guardrails,
             child_summary=child_summary,
-            aliases=colloquial_aliases
+            aliases=aliases_list,
+            merge_mode=merge_mode
         )
         return f"✅ Berhasil mencatat Kartu Identitas 6 Pilar Literasi Tinggi untuk entitas: {entity_path}."
 
 @mcp.tool()
 def memory_sync_codebase() -> str:
-    """Sinkronisasi otomatis kode via AST dan Hash SHA-256 untuk mendeteksi perubahan baris eksak."""
+    """Automatically sync codebase via AST parsing and SHA-256 hashing to detect exact line and symbol changes."""
     workspace = resolve_workspace_root()
     db = get_db()
     scanner = Scanner(workspace)

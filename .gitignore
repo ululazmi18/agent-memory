@@ -30,3 +30,16 @@ venv.bak/
 .idea/
 .vscode/
 *.tmp
+
+# SQLite & Agent Memory local runtime
+*.db
+*.db-wal
+*.db-shm
+.agents/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/

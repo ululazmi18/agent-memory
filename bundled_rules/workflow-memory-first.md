@@ -1,6 +1,6 @@
 ---
 trigger: model_decision
-description: Standar wajib 2x lipat eksplorasi ekstrem memori SQLite FTS5 untuk folder/berkas dengan rujukan baris eksak (Lstart-Lend) tanpa membaca kode mentah. Menjamin Zero-Raw File Reading via MCP.
+description: Standar wajib 2x lipat eksplorasi ekstrem memori SQLite FTS5 berdensitas tinggi (High-Density English) untuk spesifikasi teknis, pemanggilan paralel terisolasi, dan bahasa awam/slang Indonesia untuk alias pencarian.
 ---
 
 # PROTOKOL STANDAR LITERASI 2X LIPAT EKSPLORASI EKSTREM KARTU IDENTITAS MEMORI
@@ -20,33 +20,47 @@ AI Agent **DILARANG KERAS** memanggil `view_file` atau `read_file` pada berkas k
 
 ---
 
-## 2. Anatomi Identitas Folder & Prinsip Progressive Depth
-Ketika pengguna menanyakan atau menyebutkan (*mention*) suatu direktori/folder:
-1. **Fokus Inti Folder (Level 0):** Jelaskan identitas folder secara lengkap (fungsi, tujuan, manfaat, aturan khusus, peran dalam arsitektur, dan cara pemanfaatan).
-2. **Kandungan Anak Langsung (Level 1):** Berikan ringkasan singkat padat mengenai berkas atau subfolder yang berada langsung di dalamnya.
-3. **Kandungan Sub-Anak (Level 2):** Jika ada subfolder, jelaskan isinya lebih ringkas lagi (frasa atau peran kunci).
-4. **Kandungan Sub-Sub-Anak (Level 3):** Jika ada folder yang lebih dalam lagi, sebutkan hanya nama berkas/subfoldernya saja secara ringkas.
-5. **Kandungan Sangat Dalam (Level 4+):** Jika struktur sangat dalam, sebutkan agregasi jumlah berkas dan foldernya saja (misal: *terdapat 18.708 berkas audio MP3 EveryAyah*).
+## 2. Protokol Cognitive Read-Merge-Write & Granular Patching (Anti-Knowledge Regression)
+Untuk menjamin **100% Zero Information Loss** saat memperkaya atau memperbarui memori jangka panjang:
+1. **Pemeriksaan Sebelum Menulis (Read-Before-Write):**
+   - Sebelum memperbarui kartu identitas atau simbol, AI **WAJIB membaca pengetahuan yang sudah ada terlebih dahulu** (`-q <target>` atau `-i <symbol>`).
+2. **Penyatuan Kognitif Matang (Cognitive Synthesis):**
+   - AI mengolah dan menggabungkan wawasan baru dengan pengetahuan lama menjadi narasi yang utuh, kohesif, dan matang, bukan menempelkan catatan mentah yang berantakan.
+3. **Pembaruan Granular (Field-Level Patching):**
+   - AI hanya mengirimkan bagian spesifik yang berubah (misal: hanya menambahkan 1 guardrail atau 1 alias baru). Engine database memori secara otomatis melakukan **Smart Merge (Set Union & Bullet Consolidation)** tanpa menimpa atau menghapus wawasan lama yang berharga.
+4. **Safety Net Permanen:**
+   - Setiap pembaruan memori otomatis dicatat ganda ke `knowledge_seed.json` sebagai cadangan permanen.
 
 ---
 
-## 3. Mandat Rujukan Sumber Eksak (Path, Baris Awal & Baris Akhir)
+## 3. Protokol Eksekusi Paralel Terisolasi untuk Pemahaman Proyek Super Cepat (*Rapid Cognitive Ingestion*)
+Prinsip pemanggilan paralel terisolasi berlaku untuk **DUA TUJUAN UTAMA**:
+1. **Untuk Menjawab Pertanyaan Pengguna:** Menyajikan kartu identitas yang terpisah, rapi, dan tidak bercampur.
+2. **UNTUK KEBUTUHAN INTERNAL AI AGENT SENDIRI (MANDAT INTI):**
+   - Setiap kali AI menerima tugas koding, bugfix, refactoring, atau fitur baru, AI **WAJIB PROAKTIF mengeksekusi pemanggilan paralel terisolasi serentak** ke seluruh modul/berkas yang berada dalam radius kerja (*blast radius*).
+   - AI menyerap seluruh arsitektur, gotchas, dan baris eksak dalam 1 detik secara utuh tanpa terpotong batas buffer terminal sebelum menyentuh kode.
+
+---
+
+## 4. Format Output Padat Horizontal (Zero Data Loss & Anti-Truncate)
+Seluruh laporan kartu identitas disajikan dalam format **Kepadatan Horizontal Maksimal**:
+- **Pilar 1 (Purpose):** Paragraf padat fungsi dan peran bisnis.
+- **Pilar 2 (Architecture):** Relasi hulu (upstream) dan hilir (downstream) segaris.
+- **Pilar 3 (Symbols & Contracts):** Setiap fungsi disajikan dalam 2–3 baris padat horizontal (Nama, baris eksak `#Lstart-Lend`, signature lengkap, fungsi yang dipanggil, efek samping, penanganan error, fase alur, dan alias) tanpa pemangkasan data.
+- **Pilar 6 (Guardrails):** Batasan mutlak dan jebakan runtime.
+
+---
+
+## 5. Hukum Wajib Input Memori: High-Density Technical English & Pengecualian Alias Awam
+1. **Spesifikasi Teknis Wajib High-Density English:**
+   - Seluruh deskripsi teknis pada entitas, simbol, logic blocks, contracts, upstream/downstream dependencies, dan guardrails **WAJIB DIINPUTKAN DALAM BAHASA INGGRIS TEKNIS** yang ringkas, presisi, dan padat (menghemat 40-45% token).
+2. **Pengecualian Mutlak: Kamus Istilah Awam & Slang Pengguna (Colloquial Aliases):**
+   - Khusus pada bagian `aliases` dan `colloquial_aliases`, **WAJIB MEMUAT FRASA PERCAKAPAN, KEBIASAAN PERINTAH, DAN SLANG BAHASA INDONESIA SEHARI-HARI** yang sering dilontarkan pengguna (misal: "cek login", "auth token", "sambung audio", "potong ayat", "hitung diskon", "kirim email", "tarik report").
+   - Tujuannya: Memastikan pencarian intent pengguna via SQLite FTS5 selalu berhasil instan (*one-shot hit*).
+
+---
+
+## 6. Mandat Rujukan Sumber Eksak (Path, Baris Awal & Baris Akhir)
 Setiap data teknis yang dicatat di memori maupun yang disampaikan kepada pengguna **WAJIB MENYERTAKAN RUJUKAN LOKASI EKSKLUSIF: PATH BERKAS, NOMOR BARIS AWAL, DAN NOMOR BARIS AKHIR**:
 - **Format:** `[path/to/file.ext#L<start>-L<end>](file:///d:/path/to/file.ext#L<start>-L<end>)`
-- **Contoh:** `[tools/create_fatihah_master_videos.py#L78-L120](file:///d:/Documents/quran-video-studio/tools/create_fatihah_master_videos.py#L78-L120)`
-
----
-
-## 4. Standar Wajib Minimum: Kontrak 6 Pilar Literasi 2x Lipat Eksplorasi Ekstrem (Tanpa Batas Maksimal)
-Setiap entitas yang dicatat di memori database SQLite (`agent_memory`) WAJIB memenuhi standar minimal **DUA KALI LIPAT LEBIH DALAM, PADAT, DAN RINCI** tanpa batas maksimal:
-1. **Identitas & Metadata Fisik Ekstrem:** Path absolut & relatif, format encoding, shebang, ukuran biner & format human-readable, jejak resource runtime (CPU/GPU/RAM), serta kebijakan git (.gitignore).
-2. **Peran Arsitektur Hulu-Hilir & Lifecycle Data (2x Lipat):** Mengapa modul ini diciptakan, modul hulu (*upstream*) pemanggil lengkap dengan argumen/protokol CDN/URL, modul hilir (*downstream*) pengonsumsi, artefak keluaran, dan filosofi desainnya.
-3. **Kontrak Teknis, Skema Data & Indeks Simbol Lengkap (`#Lstart-Lend`):**
-   - Signature fungsi lengkap dengan type hints, docstring asli, graf pemanggilan fungsi (*internal call graph*), deteksi efek samping (*side-effects* I/O, subprocess, console), dan tipe eksepsi yang ditangani.
-   - Skema kolom dataset tabular (CSV/JSON RFC 4180) dengan tipe data terinferensi, distribusi frekuensi status verifikasi empiris 100%, serta sampel baris nyata per-kategori.
-   - Pemetaan fase logika skrip utama yang terbagi hingga 16+ sub-blok berurutan dengan baris eksak `#Lstart-Lend`, input, output, dan kamus istilah awam.
-4. **Kamus Istilah Awam Pengguna (*Colloquial Aliases* Ekstensif):** 8 s/d 15 variasi sinonim percakapan alami, istilah teknis, frasa santai bahasa Indonesia/Inggris yang mungkin diketik pengguna saat mencari via SQLite FTS5.
-5. **Kandungan Progresif Bertingkat (Level 0 s/d Level 4+):** Rincian hierarki direktori secara mendalam dari root hingga agregasi puluhan ribu berkas biner, termasuk karakteristik multimedia (bitrate audio, sample rate, resolusi gambar, font typography).
-6. **Batasan Mutlak, Gotchas & Self-Healing Runbook:** Larangan keras, pantangan mutlak arsitektural, jebakan runtime (seperti penanganan font FFmpeg di Windows, filter ASS, buffer overflow), serta prosedur pemulihan otomatis jika terjadi anomali data.
-
-Standar di atas adalah **BATAS MINIMAL**. Agen AI wajib proaktif memperinci dan melipatgandakan kedalaman informasi setiap kali melakukan pendataan awal maupun pembelajaran berkelanjutan.
+- **Contoh:** `[src/auth_service.py#L45-L78](file:///d:/path/to/project/src/auth_service.py#L45-L78)`

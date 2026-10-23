@@ -1,3 +1,42 @@
+
+def _merge_text_bullets(old_text: str, new_text: str) -> str:
+    if not old_text:
+        return new_text or ""
+    if not new_text:
+        return old_text or ""
+    if old_text.strip() == new_text.strip():
+        return old_text
+
+    import re
+    def clean_lead(s):
+        return re.sub(r'^(?:\d+[\.\)]|\-|\*|•)\s*', '', s).strip().lower()
+
+    lines_old = [line.strip() for line in old_text.splitlines() if line.strip()]
+    lines_new = [line.strip() for line in new_text.splitlines() if line.strip()]
+
+    seen = {clean_lead(l) for l in lines_old}
+    combined = list(lines_old)
+    for l in lines_new:
+        cl = clean_lead(l)
+        if cl and cl not in seen:
+            combined.append(l)
+            seen.add(cl)
+    return "\n".join(combined)
+
+def _merge_comma_items(old_text: str, new_text: str) -> str:
+    if not old_text:
+        return new_text or ""
+    if not new_text:
+        return old_text or ""
+    items = [i.strip() for i in old_text.split(",") if i.strip()]
+    new_items = [i.strip() for i in new_text.split(",") if i.strip()]
+    seen = {i.lower() for i in items}
+    for ni in new_items:
+        if ni.lower() not in seen:
+            items.append(ni)
+            seen.add(ni.lower())
+    return ", ".join(items)
+
 import sqlite3
 import json
 from pathlib import Path
@@ -249,30 +288,109 @@ class Database:
         if seed_path.exists():
             self.apply_seed(seed_path)
 
+
+    def dump_seed(self, seed_path: Optional[Path] = None):
+        if seed_path is None:
+            seed_path = self.db_path.parent / "knowledge_seed.json"
+        try:
+            entities_data = []
+            with self.connection() as conn:
+                rows = conn.execute("""
+                    SELECT path FROM entities 
+                    WHERE purpose != '' 
+                       OR path IN (SELECT DISTINCT entity_path FROM symbol_enrichments)
+                       OR path IN (SELECT DISTINCT entity_path FROM logic_blocks)
+                    ORDER BY level ASC, path ASC
+                """).fetchall()
+                for r in rows:
+                    card = self.get_entity_card(r["path"])
+                    if card:
+                        syms = []
+                        for s in card.symbols:
+                            if s.purpose or s.logic_phases or s.colloquial_aliases:
+                                syms.append({
+                                    "name": s.name,
+                                    "purpose": s.purpose,
+                                    "logic_phases": s.logic_phases,
+                                    "colloquial_aliases": s.colloquial_aliases,
+                                    "side_effects": s.side_effects,
+                                    "error_handling": s.error_handling
+                                })
+                        blks = []
+                        for b in card.logic_blocks:
+                            blks.append({
+                                "name": b.name,
+                                "start_line": b.start_line,
+                                "end_line": b.end_line,
+                                "purpose": b.purpose,
+                                "aliases": b.aliases,
+                                "inputs": b.inputs,
+                                "outputs": b.outputs
+                            })
+                        entities_data.append({
+                            "path": card.path,
+                            "purpose": card.purpose,
+                            "upstream": card.upstream,
+                            "downstream": card.downstream,
+                            "guardrails": card.guardrails,
+                            "child_summary": card.child_summary,
+                            "aliases": card.aliases,
+                            "symbols": syms,
+                            "logic_blocks": blks
+                        })
+
+                payload = {
+                    "version": "2.0-high-density-en",
+                    "standard": "2x-extreme-depth",
+                    "entities": entities_data
+                }
+                seed_path.parent.mkdir(parents=True, exist_ok=True)
+                seed_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+
     def enrich_entity(
         self,
         entity_path: str,
-        purpose: str,
+        purpose: str = "",
         upstream: str = "",
         downstream: str = "",
         guardrails: str = "",
         child_summary: str = "",
-        aliases: Optional[List[str]] = None
+        aliases: Optional[List[str]] = None,
+        merge_mode: str = "merge"
     ):
         with self.connection() as conn:
+            existing = conn.execute("SELECT * FROM entities WHERE path = ?", (entity_path,)).fetchone()
+            
+            if existing and merge_mode == "merge":
+                final_purpose = purpose if (purpose and len(purpose) >= len(existing["purpose"] or "")) else (existing["purpose"] or purpose)
+                final_upstream = _merge_comma_items(existing["upstream"] or "", upstream)
+                final_downstream = _merge_comma_items(existing["downstream"] or "", downstream)
+                final_guardrails = _merge_text_bullets(existing["guardrails"] or "", guardrails)
+                final_summary = _merge_text_bullets(existing["child_summary"] or "", child_summary)
+            else:
+                final_purpose = purpose or (existing["purpose"] if existing else "")
+                final_upstream = upstream or (existing["upstream"] if existing else "")
+                final_downstream = downstream or (existing["downstream"] if existing else "")
+                final_guardrails = guardrails or (existing["guardrails"] if existing else "")
+                final_summary = child_summary or (existing["child_summary"] if existing else "")
+
             conn.execute("""
                 UPDATE entities SET
-                    purpose = COALESCE(NULLIF(?, ''), purpose),
-                    upstream = COALESCE(NULLIF(?, ''), upstream),
-                    downstream = COALESCE(NULLIF(?, ''), downstream),
-                    guardrails = COALESCE(NULLIF(?, ''), guardrails),
-                    child_summary = COALESCE(NULLIF(?, ''), child_summary),
+                    purpose = ?,
+                    upstream = ?,
+                    downstream = ?,
+                    guardrails = ?,
+                    child_summary = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE path = ?
-            """, (purpose, upstream, downstream, guardrails, child_summary, entity_path))
+            """, (final_purpose, final_upstream, final_downstream, final_guardrails, final_summary, entity_path))
 
-            if aliases:
-                conn.execute("DELETE FROM aliases WHERE target_path = ? AND target_name = ''", (entity_path,))
+            # Smart merge aliases (Set Union)
+            if aliases is not None:
+                if merge_mode == "replace":
+                    conn.execute("DELETE FROM aliases WHERE target_path = ? AND target_name = ''", (entity_path,))
                 for a in aliases:
                     conn.execute("""
                         INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
@@ -280,18 +398,48 @@ class Database:
                     """, (entity_path, a.lower().strip()))
 
             self._update_fts_index(conn, entity_path)
+        
+        # Auto-persist to permanent seed safety net
+        self.dump_seed()
 
     def enrich_symbol(
         self,
         entity_path: str,
         symbol_name: str,
-        purpose: str,
-        logic_phases: List[str],
-        colloquial_aliases: List[str],
+        purpose: str = "",
+        logic_phases: Optional[List[str]] = None,
+        colloquial_aliases: Optional[List[str]] = None,
         side_effects: str = "",
-        error_handling: str = ""
+        error_handling: str = "",
+        merge_mode: str = "merge"
     ):
         with self.connection() as conn:
+            existing = conn.execute(
+                "SELECT * FROM symbol_enrichments WHERE entity_path = ? AND symbol_name = ?",
+                (entity_path, symbol_name)
+            ).fetchone()
+
+            new_phases = logic_phases or []
+            new_aliases = colloquial_aliases or []
+
+            if existing and merge_mode == "merge":
+                final_purpose = purpose if purpose else (existing["purpose"] or "")
+                
+                old_phases = json.loads(existing["logic_phases_json"]) if existing["logic_phases_json"] else []
+                combined_phases = list(old_phases)
+                for np in new_phases:
+                    if np not in combined_phases:
+                        combined_phases.append(np)
+                final_phases = combined_phases if combined_phases else new_phases
+
+                final_side = _merge_text_bullets(existing["side_effects"] or "", side_effects)
+                final_err = _merge_text_bullets(existing["error_handling"] or "", error_handling)
+            else:
+                final_purpose = purpose or (existing["purpose"] if existing else "")
+                final_phases = new_phases or (json.loads(existing["logic_phases_json"]) if existing and existing["logic_phases_json"] else [])
+                final_side = side_effects or (existing["side_effects"] if existing else "")
+                final_err = error_handling or (existing["error_handling"] if existing else "")
+
             conn.execute("""
                 INSERT INTO symbol_enrichments (entity_path, symbol_name, purpose, logic_phases_json, colloquial_aliases_json, side_effects, error_handling, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -303,18 +451,24 @@ class Database:
                     error_handling = excluded.error_handling,
                     updated_at = CURRENT_TIMESTAMP
             """, (
-                entity_path, symbol_name, purpose,
-                json.dumps(logic_phases), json.dumps(colloquial_aliases),
-                side_effects, error_handling
+                entity_path, symbol_name, final_purpose,
+                json.dumps(final_phases), json.dumps(new_aliases),
+                final_side, final_err
             ))
 
-            for alias in colloquial_aliases:
-                conn.execute("""
-                    INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
-                    VALUES (?, ?, ?)
-                """, (entity_path, symbol_name, alias.lower().strip()))
+            if new_aliases:
+                if merge_mode == "replace":
+                    conn.execute("DELETE FROM aliases WHERE target_path = ? AND target_name = ?", (entity_path, symbol_name))
+                for alias in new_aliases:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO aliases (target_path, target_name, alias)
+                        VALUES (?, ?, ?)
+                    """, (entity_path, symbol_name, alias.lower().strip()))
 
             self._update_fts_index(conn, entity_path)
+
+        # Auto-persist to permanent seed safety net
+        self.dump_seed()
 
     def set_logic_blocks(self, entity_path: str, blocks: list):
         norm_path = entity_path.replace("\\", "/").strip("/")

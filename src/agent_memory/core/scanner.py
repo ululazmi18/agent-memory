@@ -6,9 +6,16 @@ from pathlib import Path
 from collections import Counter
 from typing import List, Dict, Any, Optional
 
+import fnmatch
 from agent_memory.core.models import EntityCard, SymbolDetail, LogicBlock
 from agent_memory.core.ast_engine import ASTEngine
-from agent_memory.config import DEFAULT_IGNORE_PATTERNS
+from agent_memory.config import DEFAULT_IGNORE_PATTERNS, load_ignore_patterns
+
+try:
+    import pathspec
+    HAS_PATHSPEC = True
+except ImportError:
+    HAS_PATHSPEC = False
 
 try:
     import mutagen.mp3
@@ -33,14 +40,54 @@ MEDIA_EXTENSIONS = {
 class Scanner:
     def __init__(self, workspace_root: Path):
         self.root = workspace_root.resolve()
+        self.ignore_patterns = load_ignore_patterns(self.root)
+        self.default_patterns = set(DEFAULT_IGNORE_PATTERNS)
+
+        if HAS_PATHSPEC:
+            try:
+                self.pathspec_matcher = pathspec.PathSpec.from_lines("gitignore", self.ignore_patterns)
+            except Exception:
+                try:
+                    self.pathspec_matcher = pathspec.PathSpec.from_lines("gitwildmatch", self.ignore_patterns)
+                except Exception:
+                    self.pathspec_matcher = None
 
     def should_ignore(self, path: Path) -> bool:
+        if path == self.root:
+            return False
+
+        # 1. Fast-path check: parts terhadap pola bawaan
         parts = set(path.parts)
-        for ign in DEFAULT_IGNORE_PATTERNS:
+        for ign in self.default_patterns:
             if ign.startswith("*.") and path.name.endswith(ign[1:]):
                 return True
             if ign in parts:
                 return True
+
+        # 2. Relatif terhadap root workspace
+        try:
+            rel_path = path.relative_to(self.root).as_posix()
+        except ValueError:
+            return False
+
+        # 3. PathSpec matcher (GitWildMatch standar untuk .agentignore & .gitignore)
+        is_dir = path.is_dir() if path.exists() else (not bool(path.suffix))
+        if self.pathspec_matcher:
+            if self.pathspec_matcher.match_file(rel_path):
+                return True
+            if is_dir and self.pathspec_matcher.match_file(f"{rel_path}/"):
+                return True
+
+        # 4. Fallback matcher jika pathspec tidak aktif (fnmatch + prefix matching)
+        for pat in self.ignore_patterns:
+            pat_clean = pat.rstrip("/")
+            if pat_clean in parts:
+                return True
+            if rel_path == pat_clean or rel_path.startswith(f"{pat_clean}/"):
+                return True
+            if fnmatch.fnmatch(path.name, pat_clean) or fnmatch.fnmatch(rel_path, pat_clean):
+                return True
+
         return False
 
     def scan_all(self) -> List[EntityCard]:
@@ -68,10 +115,11 @@ class Scanner:
                 if self.should_ignore(file_path):
                     continue
 
-                # Filter bulk media in downloads: aggregate 18,000+ files at directory card level!
-                if "downloads" in file_path.parts:
-                    if not (file_path.name.endswith("_stitched.mp3") or file_path.name in ["vocal_boundaries_cache.json", "bismillah_reference.mp3"]):
-                        continue
+                # Bulk media optimization: Skip individual entity cards for raw media assets
+                # when in bulk directories (they are already aggregated at directory card level)
+                suffix_lower = file_path.suffix.lower()
+                if suffix_lower in MEDIA_EXTENSIONS and len(filenames) > 20:
+                    continue
 
                 card = self.scan_file(file_path, level=level + 1)
                 if card:
@@ -95,9 +143,10 @@ class Scanner:
 
         try:
             for root_w, dirs_w, files_w in os.walk(dir_path):
+                dirs_w[:] = [d for d in dirs_w if not self.should_ignore(Path(root_w) / d)]
                 # Only direct subdirs for Level 1 listing
                 if Path(root_w) == dir_path:
-                    subdirs = [d for d in dirs_w if not self.should_ignore(dir_path / d)]
+                    subdirs = [d for d in dirs_w]
                 
                 for f in files_w:
                     fp = Path(root_w) / f
@@ -149,16 +198,16 @@ class Scanner:
 
         # Format Progressive Summary
         summary_lines = []
-        summary_lines.append(f"Level {level} Direktori | Total Ukuran: {self._format_bytes(total_size)}")
+        summary_lines.append(f"Level {level} Directory | Total Size: {self._format_bytes(total_size)}")
         if subdirs:
-            summary_lines.append(f"• Subfolder Langsung ({len(subdirs)}): {', '.join(subdirs[:8])}")
+            summary_lines.append(f"• Direct Subdirectories ({len(subdirs)}): {', '.join(subdirs[:8])}")
         
         breakdown_str = ", ".join(f"{k}: {v}" for k, v in counts_by_type.items() if v > 0)
         if breakdown_str:
-            summary_lines.append(f"• Agregasi File ({sum(counts_by_type.values())} total): {breakdown_str}")
+            summary_lines.append(f"• File Aggregates ({sum(counts_by_type.values())} total): {breakdown_str}")
 
         if files:
-            summary_lines.append(f"• Berkas Langsung: {', '.join(files[:6])}")
+            summary_lines.append(f"• Direct Files: {', '.join(files[:6])}")
 
         meta: Dict[str, Any] = {
             "total_size_bytes": total_size,
@@ -178,7 +227,7 @@ class Scanner:
                     "channels": "mono" if audio.info.channels == 1 else "stereo",
                     "duration_sec": round(audio.info.length, 2)
                 }
-                summary_lines.append(f"• Karakteristik Audio (Mutagen): {meta['sample_audio']['bitrate_kbps']} kbps, {meta['sample_audio']['sample_rate_hz']} Hz, {meta['sample_audio']['channels']}")
+                summary_lines.append(f"• Audio Stream Specs (Mutagen): {meta['sample_audio']['bitrate_kbps']} kbps, {meta['sample_audio']['sample_rate_hz']} Hz, {meta['sample_audio']['channels']}")
             except Exception:
                 pass
 
@@ -192,7 +241,7 @@ class Scanner:
                         "format": img.format,
                         "mode": img.mode
                     }
-                    summary_lines.append(f"• Karakteristik Gambar (Pillow): {img.size[0]}x{img.size[1]} ({img.format}, {img.mode})")
+                    summary_lines.append(f"• Image Specs (Pillow): {img.size[0]}x{img.size[1]} ({img.format}, {img.mode})")
             except Exception:
                 pass
 
@@ -260,11 +309,23 @@ class Scanner:
                 # 1. Local project imports
                 for lp in card.metadata["imports"].get("local_project", []):
                     target_name = lp.split(".")[0] + ".py"
-                    if target_name in card_map:
-                        if target_name not in card.upstream:
-                            card.upstream = f"{card.upstream}, {target_name}".strip(", ")
-                        if card.path not in card_map[target_name].downstream:
-                            card_map[target_name].downstream = f"{card_map[target_name].downstream}, {card.path}".strip(", ")
+                    sibling_target = (Path(card.path).parent / target_name).as_posix()
+                    target_path = None
+                    if sibling_target in card_map:
+                        target_path = sibling_target
+                    elif target_name in card_map:
+                        target_path = target_name
+                    else:
+                        for p, c in card_map.items():
+                            if c.name == target_name:
+                                target_path = p
+                                break
+
+                    if target_path and target_path in card_map:
+                        if target_path not in card.upstream:
+                            card.upstream = f"{card.upstream}, {target_path}".strip(", ")
+                        if card.path not in card_map[target_path].downstream:
+                            card_map[target_path].downstream = f"{card_map[target_path].downstream}, {card.path}".strip(", ")
 
                 # 2. String literal references in Python code to data / assets
                 try:

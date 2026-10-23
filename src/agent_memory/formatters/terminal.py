@@ -8,40 +8,35 @@ class TerminalFormatter:
     @staticmethod
     def render_entity_card(card: EntityCard) -> str:
         out = []
-        out.append("=" * 85)
-        out.append(f"🏷️  KARTU IDENTITAS RESMI: {card.path} ({card.entity_type.upper()}) | Level {card.level}")
-        out.append("=" * 85)
+        size_human = card.metadata.get("size_human", f"{card.size_bytes} B") if card.metadata else f"{card.size_bytes} B"
+        out.append(f"=== [IDENTITY CARD] {card.path} (Type: {card.entity_type.upper()} | Level: {card.level} | Size: {size_human}) ===")
         
-        # Pilar 1: Tujuan & Peran Arsitektur
+        # Pillar 1: Architectural Purpose (Dense Paragraph)
         if card.purpose:
-            out.append(f"📌 [Pilar 1: Tujuan & Peran Arsitektur]:")
-            out.append(f"   {card.purpose}")
+            out.append(f"[Pillar 1: Purpose] {card.purpose}")
             
-        # Pilar 2: Upstream & Downstream
-        if card.upstream:
-            out.append(f"⬆️  [Pilar 2A: Hulu / Upstream Dependencies]:")
-            out.append(f"   {card.upstream}")
-        if card.downstream:
-            out.append(f"⬇️  [Pilar 2B: Hilir / Downstream Artifacts & Impact]:")
-            out.append(f"   {card.downstream}")
+        # Pillar 2: Upstream & Downstream (Inline Architecture Lifecycle)
+        if card.upstream or card.downstream:
+            up_str = card.upstream if card.upstream else "None (Source / Entrypoint)"
+            down_str = card.downstream if card.downstream else "None (Terminal Consumer)"
+            out.append(f"[Pillar 2: Architecture] Upstream: {up_str} | Downstream: {down_str}")
             
-        # Pilar 6: Guardrails
+        # Pillar 6: Guardrails & Constraints (Dense Paragraph)
         if card.guardrails:
-            out.append(f"🛡️  [Pilar 6: Batasan, Gotchas & Guardrails Kritis]:")
-            out.append(f"   {card.guardrails}")
+            out.append(f"[Pillar 6: Guardrails & Gotchas] {card.guardrails}")
             
-        # Pilar 4: Colloquial Aliases
+        # Pillar 4: Colloquial Aliases (Compact Inline)
         if card.aliases:
-            out.append(f"🗣️  [Pilar 4: Kamus Istilah Awam Pengguna (Colloquial Aliases)]:")
-            out.append(f"   {', '.join(card.aliases)}")
+            out.append(f"[Pillar 4: Colloquial Aliases] {', '.join(card.aliases)}")
 
-        # Pilar 5: Kandungan Direktori Bertingkat (Progressive Depth Level 0 - 4+)
+        # Pillar 5: Progressive Directory Depth (Compact lines)
         if card.child_summary:
-            out.append(f"\n📂 [Pilar 5: Kandungan Direktori Bertingkat (Progressive Depth Level 0-4+)]:")
+            out.append("[Pillar 5: Progressive Directory Depth (Level 0-4+)]")
             for line in card.child_summary.strip().split("\n"):
-                out.append(f"   {line}")
+                if line.strip():
+                    out.append(f"  {line.strip()}")
 
-        # Pilar 3 (Python): Dependensi & Metadata AST (0-Token)
+        # Pillar 3 (Python AST Specifications)
         if card.entity_type == "file_py" and card.metadata:
             meta = card.metadata
             imports = meta.get("imports", {})
@@ -49,155 +44,114 @@ class TerminalFormatter:
             cli_args = meta.get("cli_args", [])
             metrics = meta.get("metrics", {})
 
-            if imports.get("third_party") or imports.get("local_project") or imports.get("modules"):
-                out.append(f"\n📦 [Pilar 3: Dependensi & Modul Eksternal (AST 0-Token)]:")
-                if imports.get("local_project"):
-                    out.append(f"   • Proyek Lokal  : {', '.join(imports['local_project'])}")
-                if imports.get("third_party"):
-                    out.append(f"   • Third-Party   : {', '.join(imports['third_party'])}")
-                if imports.get("modules"):
-                    std_mods = [m for m in imports["modules"] if m not in imports.get("third_party", []) and m not in imports.get("local_project", [])]
-                    if std_mods:
-                        out.append(f"   • Modul Standar : {', '.join(std_mods[:10])}")
+            # Dense AST Module specs in 1-2 lines
+            dep_parts = []
+            if imports.get("local_project"):
+                dep_parts.append(f"Local: {', '.join(imports['local_project'])}")
+            if imports.get("third_party"):
+                dep_parts.append(f"Third-Party: {', '.join(imports['third_party'])}")
+            if imports.get("modules"):
+                std_mods = [m for m in imports["modules"] if m not in imports.get("third_party", []) and m not in imports.get("local_project", [])]
+                if std_mods:
+                    dep_parts.append(f"StdLib: {', '.join(std_mods[:8])}")
+            if dep_parts:
+                out.append(f"[Pillar 3: AST Dependencies] {' | '.join(dep_parts)}")
 
             if constants:
-                out.append(f"\n🧱 [Pilar 3: Konstanta Global & Konfigurasi Path]:")
-                for c in constants[:8]:
-                    out.append(f"   • L{c.get('line', '?')}: {c.get('name')} = {c.get('value')}")
+                c_str = ", ".join(f"L{c.get('line')}:{c.get('name')}={c.get('value')}" for c in constants[:6])
+                out.append(f"[Pillar 3: Constants & Paths] {c_str}")
 
             if cli_args:
-                out.append(f"\n⌨️  [Pilar 3: Antarmuka Argparse CLI ({len(cli_args)} opsi terdeteksi)]:")
-                for arg in cli_args:
-                    flags_str = "/".join(arg.get("flags", []))
-                    default_str = f" [default: {arg.get('default')}]" if arg.get("default") else ""
-                    help_str = f" - {arg.get('help')}" if arg.get("help") else ""
-                    out.append(f"   • {flags_str} ({arg.get('type')}){default_str}{help_str}")
+                args_str = " | ".join(f"{'/'.join(a.get('flags', []))} ({a.get('type')}) def:{a.get('default')} - {a.get('help')}" for a in cli_args)
+                out.append(f"[Pillar 3: CLI Interface ({len(cli_args)} flags)] {args_str}")
 
             if metrics:
-                out.append(f"\n📐 [Pilar 3: Metrik Kode Program]:")
-                out.append(f"   • Total: {metrics.get('total_lines')} baris | Kode: {metrics.get('code_lines')} baris | Komentar: {metrics.get('comment_lines')} baris | Kosong: {metrics.get('blank_lines')} baris")
+                out.append(f"[Pillar 3: Code Metrics] Total: {metrics.get('total_lines')} lines | Code: {metrics.get('code_lines')} | Comments: {metrics.get('comment_lines')} | Blank: {metrics.get('blank_lines')}")
 
-        # Pilar 3 (CSV): Skema Tabular & Distribusi
+        # Pillar 3 (Tabular CSV Specifications)
         elif card.entity_type == "file_csv" and card.metadata:
-            out.append(f"\n📊 [Pilar 3: Skema Data & Kontrak Tabular RFC 4180]:")
             cols = card.metadata.get("columns", [])
-            col_details = card.metadata.get("column_definitions", {})
-            rows_count = card.metadata.get("rows_count", 0)
             col_types = card.metadata.get("column_types", {})
+            rows_count = card.metadata.get("rows_count", 0)
             cat_dists = card.metadata.get("categorical_distributions", {})
             sample_by_cat = card.metadata.get("sample_rows_by_category", {})
             
-            out.append(f"   • Total Baris Data : {rows_count} record terdaftar")
-            out.append(f"   • Jumlah Kolom     : {len(cols)} kolom")
-
+            col_list_str = ", ".join(f"{c}({col_types.get(c, 'str')})" for c in cols[:10])
+            out.append(f"[Pillar 3: Tabular Contract RFC 4180] Rows: {rows_count} | Columns ({len(cols)}): {col_list_str}")
             if cat_dists:
-                out.append(f"   • Distribusi Kategori Empiris (0-Token Scanner):")
+                dist_items = []
                 for col_name, dist in cat_dists.items():
-                    dist_str = ", ".join(f"'{k}': {v}" for k, v in dist.items())
-                    out.append(f"     - [{col_name}]: {dist_str}")
-
-            if col_details:
-                out.append(f"   • Spesifikasi Rinci Kolom:")
-                for c_name, c_desc in col_details.items():
-                    out.append(f"     [{c_name}] -> {c_desc}")
-            elif cols:
-                cols_with_types = [f"{c} ({col_types.get(c, 'str')})" for c in cols]
-                out.append(f"   • Kolom & Tipe     : {', '.join(cols_with_types[:8])}")
-
+                    dist_items.append(f"{col_name}: " + ", ".join(f"'{k}':{v}" for k, v in dist.items()))
+                out.append(f"  • Empirical Distributions (100% Audited): {' | '.join(dist_items)}")
             if sample_by_cat:
-                out.append(f"   • Sampel Baris per Kategori:")
-                for cat_title, s_row in list(sample_by_cat.items())[:3]:
-                    out.append(f"     [{cat_title}] -> {s_row}")
+                samples = [f"[{k}] -> {v}" for k, v in list(sample_by_cat.items())[:3]]
+                out.append(f"  • Row Samples: {' | '.join(samples)}")
 
-        # Pilar 3 (JSON): Skema Struktur
+        # Pillar 3 (JSON Schema Specifications)
         elif card.entity_type == "file_json" and card.metadata:
-            out.append(f"\n📊 [Pilar 3: Skema Struktur JSON]:")
-            out.append(f"   • Tipe Data        : {card.metadata.get('type')}")
-            if "keys" in card.metadata:
-                out.append(f"   • Kunci Utama      : {', '.join(card.metadata.get('keys', []))}")
-            if "total_items" in card.metadata:
-                out.append(f"   • Total Item       : {card.metadata.get('total_items')}")
-            if "item_fields" in card.metadata:
-                out.append(f"   • Field per Elemen : {', '.join(card.metadata.get('item_fields', []))}")
+            out.append(f"[Pillar 3: JSON Schema] Type: {card.metadata.get('type')} | Keys: {', '.join(card.metadata.get('keys', []))} | Total: {card.metadata.get('total_items', 0)}")
 
-        # Simbol & Fungsi Teknis Mendalam
+        # Dense Symbols Specifications (2-3 lines per symbol, zero vertical waste, 100% data intact)
         if card.symbols:
-            out.append(f"\n⚙️  [Pilar 3: Simbol & Fungsi Teknis ({len(card.symbols)} ditemukan)]:")
+            out.append(f"[Pillar 3: Technical Symbols & Contracts ({len(card.symbols)} functions detected)]")
             for s in card.symbols:
-                line_ref = f"{card.path}#L{s.start_line}-L{s.end_line}"
-                out.append(f"  ┌── 🔹 {s.name} [{line_ref}]")
-                if s.signature:
-                    out.append(f"  │   Signature : {s.signature}")
+                calls_str = f"Calls: {', '.join(s.calls[:6])}" if s.calls else "Calls: pure"
+                side_str = f" | Side-effects: {s.side_effects}" if s.side_effects else ""
+                err_str = f" | Error-hnd: {s.error_handling}" if s.error_handling else ""
+                out.append(f"• [{s.name}] [{card.path}#L{s.start_line}-L{s.end_line}] `{s.signature}` | {calls_str}{side_str}{err_str}")
                 if s.purpose:
-                    out.append(f"  │   Peran     : {s.purpose}")
-                if s.colloquial_aliases:
-                    out.append(f"  │   Alias     : {', '.join(s.colloquial_aliases)}")
-                if s.calls:
-                    out.append(f"  │   Calls     : {', '.join(s.calls[:8])}")
+                    out.append(f"  Purpose: {s.purpose}")
+                meta_extra = []
                 if s.logic_phases:
-                    out.append(f"  │   Fase Alur :")
-                    for p in s.logic_phases:
-                        out.append(f"  │     * {p}")
-                if s.side_effects:
-                    out.append(f"  │   Side-Eff  : {s.side_effects}")
-                if s.error_handling:
-                    out.append(f"  │   Error-Hnd : {s.error_handling}")
-                out.append(f"  └──")
+                    meta_extra.append("Phases: " + " -> ".join(f"({i+1}) {p}" for i, p in enumerate(s.logic_phases)))
+                if s.colloquial_aliases:
+                    meta_extra.append(f"Aliases: {', '.join(s.colloquial_aliases)}")
+                if meta_extra:
+                    out.append(f"  {' | '.join(meta_extra)}")
 
-        # Blok Logika Internal
+        # Dense Logic Blocks Specifications (2 lines per sub-block)
         if card.logic_blocks:
-            out.append(f"\n🧩 [Pilar 3: Fase Logika Internal ({len(card.logic_blocks)} sub-blok dipetakan)]:")
+            out.append(f"[Pillar 3: Sub-Block Execution Phases ({len(card.logic_blocks)} phases mapped)]")
             for b in card.logic_blocks:
-                out.append(f"  • [{card.path}#L{b.start_line}-L{b.end_line}] {b.name}")
+                io_str = f" | In: {b.inputs} -> Out: {b.outputs}" if (b.inputs or b.outputs) else ""
+                alias_str = f" | Aliases: {', '.join(b.aliases)}" if b.aliases else ""
+                out.append(f"• [{card.path}#L{b.start_line}-L{b.end_line}] {b.name}{io_str}{alias_str}")
                 if b.purpose:
-                    out.append(f"    Aksi      : {b.purpose}")
-                if b.inputs:
-                    out.append(f"    Input     : {b.inputs}")
-                if b.outputs:
-                    out.append(f"    Output    : {b.outputs}")
-                if b.aliases:
-                    out.append(f"    Alias     : {', '.join(b.aliases)}")
+                    out.append(f"  Action: {b.purpose}")
 
-        out.append("")
+        out.append(f"--- [END OF CARD: {card.path}] ---\n")
         return "\n".join(out)
 
     @staticmethod
     def render_symbol_detail(sym: SymbolDetail, entity_path: str) -> str:
         out = []
-        out.append("=" * 85)
-        out.append(f"⚙️  SPESIFIKASI TEKNIS SIMBOL: {sym.name} [{entity_path}#L{sym.start_line}-L{sym.end_line}]")
-        out.append("=" * 85)
-        out.append(f"📌 [Tujuan & Peran Bisnis]:\n   {sym.purpose or 'Belum ada penjelasan'}")
-        if sym.signature:
-            out.append(f"✍️  [Signature / Kontrak Teknis]:\n   {sym.signature}")
-        if sym.colloquial_aliases:
-            out.append(f"🗣️  [Istilah Awam Pengguna (Colloquial Aliases)]:\n   {', '.join(sym.colloquial_aliases)}")
-        if sym.calls:
-            out.append(f"📞 [Internal Call Graph / Fungsi yang Dipanggil]:\n   {', '.join(sym.calls)}")
+        out.append(f"=== [SYMBOL SPEC] {sym.name} [{entity_path}#L{sym.start_line}-L{sym.end_line}] ===")
+        out.append(f"Signature: `{sym.signature}` | Type: {sym.symbol_type}")
+        if sym.purpose:
+            out.append(f"Purpose: {sym.purpose}")
+        calls_str = f"Calls: {', '.join(sym.calls)}" if sym.calls else "Calls: pure"
+        side_str = f" | Side-effects: {sym.side_effects}" if sym.side_effects else ""
+        err_str = f" | Error-hnd: {sym.error_handling}" if sym.error_handling else ""
+        out.append(f"Contracts: {calls_str}{side_str}{err_str}")
         if sym.docstring:
-            out.append(f"📖 [Docstring Asli Kode]:\n   {sym.docstring.strip()}")
+            out.append(f"Docstring: {sym.docstring.strip()}")
         if sym.logic_phases:
-            out.append(f"🔄 [Fase & Alur Eksekusi Internal]:")
-            for p in sym.logic_phases:
-                out.append(f"   • {p}")
-        if sym.side_effects:
-            out.append(f"💾 [Side Effects / Hasil File]:\n   {sym.side_effects}")
-        if sym.error_handling:
-            out.append(f"🛡️  [Penanganan Error / Defensif]:\n   {sym.error_handling}")
-        out.append("")
+            out.append("Execution Phases: " + " -> ".join(f"({i+1}) {p}" for i, p in enumerate(sym.logic_phases)))
+        if sym.colloquial_aliases:
+            out.append(f"Aliases: {', '.join(sym.colloquial_aliases)}")
+        out.append(f"--- [END OF SYMBOL SPEC: {sym.name}] ---\n")
         return "\n".join(out)
 
     @staticmethod
     def render_find_results(term: str, matches: list) -> str:
-        out = [f"🔍 HASIL PENCARIAN INTENT PENGGUNA: '{term}' ({len(matches)} target ditemukan)"]
+        out = [f"[USER INTENT SEARCH] Query: '{term}' ({len(matches)} matches found)"]
         if not matches:
-            out.append("  (Tidak ditemukan kecocokan)")
+            out.append("  (No direct matches found in memory)")
         for m in matches:
             target = f"{m['path']}"
             if m.get("target_name"):
                 target += f" -> {m['target_name']}"
-            out.append(f"  🎯 [Skor: {m.get('match_score', 1.0)}] {target}")
-            if m.get("details"):
-                out.append(f"     Info: {m['details']}")
+            det = f" | Context: {m['details']}" if m.get("details") else ""
+            out.append(f"• [Score: {m.get('match_score', 1.0)}] {target}{det}")
         out.append("")
         return "\n".join(out)

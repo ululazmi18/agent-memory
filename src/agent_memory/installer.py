@@ -65,14 +65,15 @@ def install_skill(pkg_root: Path, config_dir: Path) -> Path:
     target_skill_dir.mkdir(parents=True, exist_ok=True)
     target_skill_file = target_skill_dir / "SKILL.md"
 
-    src_skill = pkg_root / "bundled_skills" / "agent-memory" / "SKILL.md"
-    if src_skill.exists():
-        shutil.copy2(src_skill, target_skill_file)
-    else:
-        # Fallback if bundled not found directly
-        src_skill_alt = Path(__file__).resolve().parent.parent.parent / "bundled_skills" / "agent-memory" / "SKILL.md"
-        if src_skill_alt.exists():
-            shutil.copy2(src_skill_alt, target_skill_file)
+    candidates = [
+        Path(__file__).resolve().parent / "bundled_skills" / "agent-memory" / "SKILL.md",
+        pkg_root / "bundled_skills" / "agent-memory" / "SKILL.md",
+        pkg_root.parent / "bundled_skills" / "agent-memory" / "SKILL.md"
+    ]
+    for src in candidates:
+        if src.exists():
+            shutil.copy2(src, target_skill_file)
+            break
 
     return target_skill_file
 
@@ -82,13 +83,15 @@ def install_rules(pkg_root: Path, workspace_root: Path) -> Path:
     target_rules_dir.mkdir(parents=True, exist_ok=True)
     target_rule_file = target_rules_dir / "workflow-memory-first.md"
 
-    src_rule = pkg_root / "bundled_rules" / "workflow-memory-first.md"
-    if src_rule.exists():
-        shutil.copy2(src_rule, target_rule_file)
-    else:
-        src_rule_alt = Path(__file__).resolve().parent.parent.parent / "bundled_rules" / "workflow-memory-first.md"
-        if src_rule_alt.exists():
-            shutil.copy2(src_rule_alt, target_rule_file)
+    candidates = [
+        Path(__file__).resolve().parent / "bundled_rules" / "workflow-memory-first.md",
+        pkg_root / "bundled_rules" / "workflow-memory-first.md",
+        pkg_root.parent / "bundled_rules" / "workflow-memory-first.md"
+    ]
+    for src in candidates:
+        if src.exists():
+            shutil.copy2(src, target_rule_file)
+            break
 
     # Optional mirror to D:\.agents\rules if on master host
     master_rules_dir = Path("D:/.agents/rules")

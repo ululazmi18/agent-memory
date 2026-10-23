@@ -5,14 +5,61 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-memory"
 version = "0.1.0"
-description = "Deterministic High-Density Memory Engine & MCP Server for AI Coding Agents"
+description = "Deterministic High-Density Memory Engine & Autonomous MCP Server for AI Coding Agents"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
 authors = [{ name = "Antigravity AI Agent Team" }]
+keywords = [
+    "ai-agents",
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "code-intelligence",
+    "ast-parser",
+    "sqlite-fts5",
+    "token-optimization",
+    "context-window",
+    "google-antigravity",
+    "claude-code",
+    "cursor",
+    "windsurf"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent"
+]
 dependencies = [
     "rich>=13.0.0",
     "mcp>=2.0.0",
+    "pathspec>=0.11.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0"
+]
+media = [
+    "mutagen>=1.47.0",
+    "pillow>=10.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/agent-memory/agent-memory"
+Documentation = "https://github.com/agent-memory/agent-memory#readme"
+Repository = "https://github.com/agent-memory/agent-memory.git"
+Issues = "https://github.com/agent-memory/agent-memory/issues"
 
 [project.scripts]
 agent-memory = "agent_memory.cli:main"
@@ -20,3 +67,14 @@ agent-memory-mcp = "agent_memory.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agent_memory = [
+    "bundled_rules/*.md",
+    "bundled_skills/**/*.md"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
