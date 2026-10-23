@@ -56,10 +56,10 @@ media = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/agent-memory/agent-memory"
-Documentation = "https://github.com/agent-memory/agent-memory#readme"
-Repository = "https://github.com/agent-memory/agent-memory.git"
-Issues = "https://github.com/agent-memory/agent-memory/issues"
+Homepage = "https://github.com/ululazmi18/agent-memory"
+Documentation = "https://github.com/ululazmi18/agent-memory#readme"
+Repository = "https://github.com/ululazmi18/agent-memory.git"
+Issues = "https://github.com/ululazmi18/agent-memory/issues"
 
 [project.scripts]
 agent-memory = "agent_memory.cli:main"
