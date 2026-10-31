@@ -92,10 +92,10 @@ class Scanner:
 
     def scan_all(self) -> List[EntityCard]:
         cards: List[EntityCard] = []
-        # 1. Scan root directory
-        cards.append(self.scan_directory(self.root, level=0))
+        dir_entries: Dict[Path, Dict[str, Any]] = {}
+        file_cards: List[EntityCard] = []
 
-        # Menggunakan os.walk untuk traversal cepat dan in-place pruning
+        # 1. Single-pass linear O(N) traversal (Zero redundant os.walk)
         for root_dir, dirnames, filenames in os.walk(self.root):
             curr_dir = Path(root_dir)
             dirnames[:] = [d for d in dirnames if not self.should_ignore(curr_dir / d)]
@@ -103,105 +103,109 @@ class Scanner:
             rel_path = curr_dir.relative_to(self.root).as_posix() if curr_dir != self.root else "."
             level = len(Path(rel_path).parts) if rel_path != "." else 0
 
-            # Record directory card (root already recorded)
-            if curr_dir != self.root:
-                if self.should_ignore(curr_dir):
-                    continue
-                cards.append(self.scan_directory(curr_dir, level=level))
+            subdirs = list(dirnames)
+            dir_files: List[str] = []
+            counts_by_type: Counter = Counter()
+            direct_size = 0
+            sample_audio_path = None
+            sample_image_path = None
 
-            # Record files
             for fname in filenames:
                 file_path = curr_dir / fname
                 if self.should_ignore(file_path):
                     continue
 
+                try:
+                    sz = file_path.stat().st_size
+                    direct_size += sz
+                except OSError:
+                    sz = 0
+
+                suf = file_path.suffix.lower()
+                dir_files.append(fname)
+
+                if suf == ".py":
+                    counts_by_type["Python Scripts"] += 1
+                elif suf in [".csv", ".tsv"]:
+                    counts_by_type["CSV Tabular"] += 1
+                elif suf == ".json":
+                    counts_by_type["JSON Data"] += 1
+                elif suf in [".md", ".markdown", ".txt"]:
+                    counts_by_type["Documentation"] += 1
+                elif suf in [".mp3", ".wav", ".aac"]:
+                    counts_by_type["Audio Files"] += 1
+                    if not sample_audio_path and suf == ".mp3":
+                        sample_audio_path = file_path
+                elif suf in [".srt", ".vtt", ".ass"]:
+                    counts_by_type["Subtitles"] += 1
+                elif suf in [".ttf", ".otf"]:
+                    counts_by_type["Typography Fonts"] += 1
+                elif suf in [".jpg", ".jpeg", ".png", ".webp"]:
+                    counts_by_type["Images / Backgrounds"] += 1
+                    if not sample_image_path:
+                        sample_image_path = file_path
+                elif suf in [".mp4", ".mkv", ".webm"]:
+                    counts_by_type["Video Masters"] += 1
+                else:
+                    counts_by_type["Other"] += 1
+
                 # Bulk media optimization: Skip individual entity cards for raw media assets
                 # when in bulk directories (they are already aggregated at directory card level)
-                suffix_lower = file_path.suffix.lower()
-                if suffix_lower in MEDIA_EXTENSIONS and len(filenames) > 20:
+                if suf in MEDIA_EXTENSIONS and len(filenames) > 20:
                     continue
 
                 card = self.scan_file(file_path, level=level + 1)
                 if card:
-                    cards.append(card)
+                    file_cards.append(card)
 
-        # 2. Cross-reference Upstream/Downstream Inference (0 Tokens)
+            dir_entries[curr_dir] = {
+                "rel_path": rel_path,
+                "name": curr_dir.name if rel_path != "." else self.root.name,
+                "level": level,
+                "subdirs": subdirs,
+                "files": dir_files,
+                "counts_by_type": counts_by_type,
+                "total_size": direct_size,
+                "sample_audio_path": sample_audio_path,
+                "sample_image_path": sample_image_path,
+            }
+
+        # 2. Bottom-up aggregation: Akumulasikan ukuran dan tipe dari anak ke induk (Zero Disk I/O)
+        sorted_dirs = sorted(dir_entries.keys(), key=lambda d: len(d.parts), reverse=True)
+        for d in sorted_dirs:
+            if d != self.root:
+                parent = d.parent
+                if parent in dir_entries:
+                    dir_entries[parent]["total_size"] += dir_entries[d]["total_size"]
+                    dir_entries[parent]["counts_by_type"].update(dir_entries[d]["counts_by_type"])
+                    if not dir_entries[parent]["sample_audio_path"] and dir_entries[d]["sample_audio_path"]:
+                        dir_entries[parent]["sample_audio_path"] = dir_entries[d]["sample_audio_path"]
+                    if not dir_entries[parent]["sample_image_path"] and dir_entries[d]["sample_image_path"]:
+                        dir_entries[parent]["sample_image_path"] = dir_entries[d]["sample_image_path"]
+
+        # 3. Bentuk EntityCard untuk direktori secara instan
+        dir_cards = [self._build_dir_card(info) for info in dir_entries.values()]
+        cards = dir_cards + file_cards
+
+        # 4. Cross-reference Upstream/Downstream Inference (0 Tokens)
         self._infer_cross_references(cards)
 
         return cards
 
-    def scan_directory(self, dir_path: Path, level: int) -> EntityCard:
-        rel_path = dir_path.relative_to(self.root).as_posix() if dir_path != self.root else "."
-        name = dir_path.name if rel_path != "." else self.root.name
+    def _build_dir_card(self, info: Dict[str, Any]) -> EntityCard:
+        level = info["level"]
+        total_size = info["total_size"]
+        subdirs = info["subdirs"]
+        files = info["files"]
+        counts_by_type = info["counts_by_type"]
+        sample_audio_path = info["sample_audio_path"]
+        sample_image_path = info["sample_image_path"]
 
-        subdirs = []
-        files = []
-        counts_by_type = Counter()
-        total_size = 0
-        sample_audio_path = None
-        sample_image_path = None
-
-        try:
-            for root_w, dirs_w, files_w in os.walk(dir_path):
-                dirs_w[:] = [d for d in dirs_w if not self.should_ignore(Path(root_w) / d)]
-                # Only direct subdirs for Level 1 listing
-                if Path(root_w) == dir_path:
-                    subdirs = [d for d in dirs_w]
-                
-                for f in files_w:
-                    fp = Path(root_w) / f
-                    if self.should_ignore(fp):
-                        continue
-                    try:
-                        sz = fp.stat().st_size
-                        total_size += sz
-                    except OSError:
-                        pass
-                    
-                    suf = fp.suffix.lower()
-                    if suf == ".py":
-                        counts_by_type["Python Scripts"] += 1
-                        if Path(root_w) == dir_path:
-                            files.append(f)
-                    elif suf in [".csv", ".tsv"]:
-                        counts_by_type["CSV Tabular"] += 1
-                        if Path(root_w) == dir_path:
-                            files.append(f)
-                    elif suf == ".json":
-                        counts_by_type["JSON Data"] += 1
-                        if Path(root_w) == dir_path:
-                            files.append(f)
-                    elif suf in [".md", ".markdown", ".txt"]:
-                        counts_by_type["Documentation"] += 1
-                        if Path(root_w) == dir_path:
-                            files.append(f)
-                    elif suf in [".mp3", ".wav", ".aac"]:
-                        counts_by_type["Audio Files"] += 1
-                        if not sample_audio_path and suf == ".mp3":
-                            sample_audio_path = fp
-                    elif suf in [".srt", ".vtt", ".ass"]:
-                        counts_by_type["Subtitles"] += 1
-                    elif suf in [".ttf", ".otf"]:
-                        counts_by_type["Typography Fonts"] += 1
-                        if Path(root_w) == dir_path:
-                            files.append(f)
-                    elif suf in [".jpg", ".jpeg", ".png", ".webp"]:
-                        counts_by_type["Images / Backgrounds"] += 1
-                        if not sample_image_path:
-                            sample_image_path = fp
-                    elif suf in [".mp4", ".mkv", ".webm"]:
-                        counts_by_type["Video Masters"] += 1
-                    else:
-                        counts_by_type["Other"] += 1
-        except PermissionError:
-            pass
-
-        # Format Progressive Summary
         summary_lines = []
         summary_lines.append(f"Level {level} Directory | Total Size: {self._format_bytes(total_size)}")
         if subdirs:
             summary_lines.append(f"• Direct Subdirectories ({len(subdirs)}): {', '.join(subdirs[:8])}")
-        
+
         breakdown_str = ", ".join(f"{k}: {v}" for k, v in counts_by_type.items() if v > 0)
         if breakdown_str:
             summary_lines.append(f"• File Aggregates ({sum(counts_by_type.values())} total): {breakdown_str}")
@@ -246,14 +250,63 @@ class Scanner:
                 pass
 
         return EntityCard(
-            path=rel_path,
-            name=name,
+            path=info["rel_path"],
+            name=info["name"],
             entity_type="dir",
             level=level,
             size_bytes=total_size,
             child_summary="\n".join(summary_lines),
             metadata=meta
         )
+
+    def scan_directory(self, dir_path: Path, level: int) -> EntityCard:
+        """Fallback untuk pemindaian satu direktori secara terisolasi jika dipanggil langsung."""
+        rel_path = dir_path.relative_to(self.root).as_posix() if dir_path != self.root else "."
+        name = dir_path.name if rel_path != "." else self.root.name
+
+        subdirs = []
+        files = []
+        counts_by_type = Counter()
+        total_size = 0
+        sample_audio_path = None
+        sample_image_path = None
+
+        try:
+            for entry in dir_path.iterdir():
+                if self.should_ignore(entry):
+                    continue
+                if entry.is_dir():
+                    subdirs.append(entry.name)
+                else:
+                    files.append(entry.name)
+                    try:
+                        total_size += entry.stat().st_size
+                    except OSError:
+                        pass
+                    suf = entry.suffix.lower()
+                    if suf == ".py":
+                        counts_by_type["Python Scripts"] += 1
+                    elif suf == ".json":
+                        counts_by_type["JSON Data"] += 1
+                    elif suf in [".md", ".txt"]:
+                        counts_by_type["Documentation"] += 1
+                    else:
+                        counts_by_type["Other"] += 1
+        except (PermissionError, OSError):
+            pass
+
+        info = {
+            "rel_path": rel_path,
+            "name": name,
+            "level": level,
+            "subdirs": subdirs,
+            "files": files,
+            "counts_by_type": counts_by_type,
+            "total_size": total_size,
+            "sample_audio_path": sample_audio_path,
+            "sample_image_path": sample_image_path
+        }
+        return self._build_dir_card(info)
 
     def scan_file(self, file_path: Path, level: int) -> Optional[EntityCard]:
         rel_path = file_path.relative_to(self.root).as_posix()

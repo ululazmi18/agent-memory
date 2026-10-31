@@ -133,6 +133,13 @@ class Database:
     def connection(self):
         conn = sqlite3.connect(str(self.db_path), timeout=10.0)
         conn.row_factory = sqlite3.Row
+        # PRAGMA Turbo Engine: Maksimalkan kecepatan I/O dan minimalkan beban disk di Windows
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA temp_store = MEMORY;")
+        conn.execute("PRAGMA mmap_size = 268435456;")
+        conn.execute("PRAGMA cache_size = -64000;")
+        conn.execute("PRAGMA busy_timeout = 10000;")
         try:
             yield conn
             conn.commit()
